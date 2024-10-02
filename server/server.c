@@ -11,9 +11,11 @@ void initialize_rooms(int num_rooms) {
         rooms[i].scores[1] = 0;
         pthread_mutex_init(&rooms[i].room_mutex, NULL);
         // Initialize the board with 4 seeds in each pit
-        for (int j = 0; j < 2; j++)
-            for (int k = 0; k < 6; k++)
-                rooms[i].board[j][k] = 4;
+        for (int row = 0; row < NUM_ROWS; row++) {
+            for (int pit = 0; pit < NUM_PITS; pit++) {
+                rooms[i].board[row][pit] = 4;
+            }
+        }
     }
 }
 
@@ -22,6 +24,101 @@ void update_score_file(const char *winner_pseudo) {
     if (file != NULL) {
         fprintf(file, "%s wins a game\n", winner_pseudo);
         fclose(file);
+    }
+}
+
+void send_board_state(int socket, Room *room, int player_id) {
+    char buffer[MAX_BUFFER_SIZE];
+    snprintf(buffer, sizeof(buffer), "BOARD_STATE\n%s", format_board(room, player_id));
+    send(socket, buffer, strlen(buffer), 0);
+}
+
+char* format_board(Room *room, int player_id) {
+    static char board_str[2048];
+    int opponent_id = 1 - player_id;
+
+    snprintf(board_str, sizeof(board_str), "\n\t\t\tJoueur %d\n", opponent_id + 1);
+    strcat(board_str, "\t[1]\t[2]\t[3]\t[4]\t[5]\t[6]\n");
+    strcat(board_str, " +----+-----+-----+-----+-----+-----+-----+----+\n");
+    snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
+             " |    |  %2d |  %2d |  %2d |  %2d |  %2d |  %2d |    |\n",
+             room->board[opponent_id][5], room->board[opponent_id][4], room->board[opponent_id][3],
+             room->board[opponent_id][2], room->board[opponent_id][1], room->board[opponent_id][0]);
+    snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
+             " | %2d +-----+-----+-----+-----+-----+-----+ %2d |\n",
+             room->scores[player_id], room->scores[opponent_id]);
+    snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
+             " |    |  %2d |  %2d |  %2d |  %2d |  %2d |  %2d |    |\n",
+             room->board[player_id][0], room->board[player_id][1], room->board[player_id][2],
+             room->board[player_id][3], room->board[player_id][4], room->board[player_id][5]);
+    strcat(board_str, " +----+-----+-----+-----+-----+-----+-----+----+\n");
+    strcat(board_str, "\t[1]\t[2]\t[3]\t[4]\t[5]\t[6]\n");
+    snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
+             "\t\t\tJoueur %d\n", player_id + 1);
+
+    return board_str;
+}
+
+void execute_move(Room *room, int player_id, int pit_choice) {
+    int seeds = room->board[player_id][pit_choice];
+    room->board[player_id][pit_choice] = 0;
+    int current_row = player_id;
+    int current_pit = pit_choice;
+
+    while (seeds > 0) {
+        // Move to next pit
+        current_pit++;
+        if (current_row == player_id && current_pit == NUM_PITS) {
+            current_row = 1 - current_row; // Switch row
+            current_pit = 0;
+        } else if (current_row != player_id && current_pit == NUM_PITS) {
+            current_row = 1 - current_row; // Switch back to player's row
+            current_pit = 0;
+        }
+
+        // Skip the starting pit
+        if (current_row == player_id && current_pit == pit_choice) {
+            continue;
+        }
+
+        room->board[current_row][current_pit]++;
+        seeds--;
+    }
+
+    // Simplified capture logic
+    // Check if the last seed landed on the opponent's side with 2 or 3 seeds
+    if (current_row != player_id) {
+        int captured_seeds = 0;
+        while (current_pit >= 0 && (room->board[current_row][current_pit] == 2 || room->board[current_row][current_pit] == 3)) {
+            captured_seeds += room->board[current_row][current_pit];
+            room->board[current_row][current_pit] = 0;
+            current_pit--;
+        }
+        room->scores[player_id] += captured_seeds;
+    }
+}
+
+int is_game_over(Room *room) {
+    // Check if one side is empty
+    int player1_empty = 1;
+    int player2_empty = 1;
+    for (int i = 0; i < NUM_PITS; i++) {
+        if (room->board[0][i] > 0) player1_empty = 0;
+        if (room->board[1][i] > 0) player2_empty = 0;
+    }
+    return player1_empty || player2_empty;
+}
+
+int determine_winner(Room *room) {
+    // Compare scores to determine the winner
+    if (room->scores[0] > room->scores[1]) return 0;
+    else if (room->scores[1] > room->scores[0]) return 1;
+    else return -1; // Draw
+}
+
+void send_to_both_players(Room *room, const char *message) {
+    for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+        send(room->players[i]->socket, message, strlen(message), 0);
     }
 }
 
@@ -39,7 +136,6 @@ void *handle_client(void *arg) {
     }
     player->pseudo[bytes_received] = '\0';
 
-    // Send initial room status
     while (1) {
         // Send room status
         snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
@@ -91,23 +187,25 @@ void *handle_client(void *arg) {
 
     // Game loop
     Room *room = &rooms[player->room_id];
-    while (1) {
-        // Lock the room during the game turn
+    int opponent_id = 1 - player->player_id;
+    Player *opponent = room->players[opponent_id];
+    int game_over = 0;
+
+    while (!game_over) {
         pthread_mutex_lock(&room->room_mutex);
 
         // Check if it's this player's turn
         if (room->current_turn == player->player_id) {
             // Send the board state to the player
-            // For simplicity, we'll send a placeholder board state
-            snprintf(buffer, sizeof(buffer), "YOUR_TURN\nBoard State: ...\nEnter your move:");
-            send(player->socket, buffer, strlen(buffer), 0);
+            send_board_state(player->socket, room, player->player_id);
+
+            // Prompt the player for their move
+            send(player->socket, "YOUR_TURN\nEnter the pit number (1-6): ", 39, 0);
 
             // Receive the player's move
             bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
             if (bytes_received <= 0) {
                 // Handle disconnection
-                int opponent_id = 1 - player->player_id;
-                Player *opponent = room->players[opponent_id];
                 send(opponent->socket, "OPPONENT_DISCONNECTED", 21, 0);
                 update_score_file(opponent->pseudo);
                 close(player->socket);
@@ -116,33 +214,50 @@ void *handle_client(void *arg) {
                 pthread_exit(NULL);
             }
             buffer[bytes_received] = '\0';
+            int pit_choice = atoi(buffer) - 1; // Convert to 0-based index
 
-            // Process the move (this is where game logic would go)
-            // For now, we'll just switch turns
-            room->current_turn = 1 - room->current_turn;
+            // Validate the move
+            if (pit_choice < 0 || pit_choice >= NUM_PITS || room->board[player->player_id][pit_choice] == 0) {
+                send(player->socket, "INVALID_MOVE", 12, 0);
+            } else {
+                // Execute the move
+                execute_move(room, player->player_id, pit_choice);
 
-            // Send updated board state to both players
-            snprintf(buffer, sizeof(buffer), "BOARD_UPDATE\nBoard State: ...\n");
-            for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
-                send(room->players[i]->socket, buffer, strlen(buffer), 0);
+                // Check for game over condition
+                if (is_game_over(room)) {
+                    game_over = 1;
+                    // Determine winner and update scores
+                    int winner_id = determine_winner(room);
+                    if (winner_id == -1) {
+                        send_to_both_players(room, "GAME_OVER\nMatch nul !");
+                    } else {
+                        char win_msg[50];
+                        snprintf(win_msg, sizeof(win_msg), "GAME_OVER\n%s gagne la partie !", room->players[winner_id]->pseudo);
+                        send_to_both_players(room, win_msg);
+                        update_score_file(room->players[winner_id]->pseudo);
+                    }
+                } else {
+                    // Switch turns
+                    room->current_turn = opponent_id;
+                    // Send updated board to both players
+                    send_board_state(opponent->socket, room, opponent_id);
+                    send_board_state(player->socket, room, player->player_id);
+                }
             }
         } else {
             // Send waiting message
-            snprintf(buffer, sizeof(buffer), "WAITING_FOR_OPPONENT\n");
-            send(player->socket, buffer, strlen(buffer), 0);
+            send(player->socket, "WAITING_FOR_OPPONENT", 20, 0);
         }
 
         pthread_mutex_unlock(&room->room_mutex);
-
-        // Small delay to prevent busy waiting
-        sleep(1);
+        sleep(1); // Prevent busy waiting
     }
 
+    // Close connections
     close(player->socket);
     free(player);
     pthread_exit(NULL);
 }
-
 
 int main(int argc, char *argv[]) {
     int server_socket, client_socket;
@@ -166,6 +281,11 @@ int main(int argc, char *argv[]) {
     if (server_socket < 0) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
+    }
+
+    int reuse = 1;
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse)) < 0) {
+        perror("setsockopt(SO_REUSEADDR) failed");
     }
 
     server_addr.sin_family = AF_INET;

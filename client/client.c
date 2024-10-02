@@ -13,32 +13,50 @@ void *receive_handler(void *socket_desc) {
 
         // Handle different server messages
         if (strncmp(buffer, "ROOM_STATUS", 11) == 0) {
-            printf("Available Rooms:\n%s\n", buffer + 12);
-            printf("Please select a room number: ");
+            printf("+------------------------------------------------------------------+\n");
+            printf("|   Voici les rooms disponibles :                                   |\n");
+            printf("|                                                                  |\n");
+            char *room_info = buffer + 12;
+            char *line = strtok(room_info, "\n");
+            while (line != NULL) {
+                printf("|  --------------------------------------------------------------  |\n");
+                printf("|  | %s |  |\n", line);
+                line = strtok(NULL, "\n");
+            }
+            printf("|                                                                  |\n");
+            printf("+------------------------------------------------------------------+\n");
+            printf("Veuillez sélectionner une room de jeu : ");
             fflush(stdout);
         } else if (strcmp(buffer, "INVALID_ROOM") == 0) {
-            printf("/!\\ The room you selected is invalid, please choose another /!\\\n");
-            printf("Please select a room number: ");
+            printf("/!\\ La room que vous avez choisie est invalide, choisissez-en une autre /!\\\n");
+            printf("Veuillez sélectionner une room de jeu : ");
             fflush(stdout);
         } else if (strcmp(buffer, "ROOM_FULL") == 0) {
-            printf("/!\\ The room you selected is already full, please choose another /!\\\n");
-            printf("Please select a room number: ");
+            printf("/!\\ La room que vous avez choisie est déjà complète, choisissez-en une autre /!\\\n");
+            printf("Veuillez sélectionner une room de jeu : ");
             fflush(stdout);
         } else if (strcmp(buffer, "JOINED_ROOM") == 0) {
-            printf("Perfect, you will be connected to your room!\n");
-            printf("Waiting for an opponent...\n");
+            printf("Parfait, vous allez être connecté à votre room !\n");
+            printf("En attente d'un autre joueur...\n");
         } else if (strcmp(buffer, "GAME_START") == 0) {
-            printf("Game is starting!\n");
+            printf("La partie commence !\n");
         } else if (strncmp(buffer, "YOUR_TURN", 9) == 0) {
-            printf("%s\n", buffer + 10);
-            printf("Enter your move: ");
+            printf("%s", buffer + 9);
+            printf("\nEntrez votre coup : ");
             fflush(stdout);
         } else if (strncmp(buffer, "WAITING_FOR_OPPONENT", 20) == 0) {
-            printf("Waiting for opponent's move...\n");
-        } else if (strncmp(buffer, "BOARD_UPDATE", 12) == 0) {
-            printf("%s\n", buffer + 13);
+            printf("En attente du coup de votre adversaire...\n");
+        } else if (strncmp(buffer, "BOARD_STATE", 11) == 0) {
+            printf("%s", buffer + 11);
+        } else if (strcmp(buffer, "INVALID_MOVE") == 0) {
+            printf("Mouvement invalide. Veuillez réessayer.\n");
+            printf("Entrez votre coup : ");
+            fflush(stdout);
+        } else if (strncmp(buffer, "GAME_OVER", 9) == 0) {
+            printf("%s\n", buffer + 9);
+            exit(EXIT_SUCCESS);
         } else if (strcmp(buffer, "OPPONENT_DISCONNECTED") == 0) {
-            printf("Your opponent has disconnected. You win by default!\n");
+            printf("Votre adversaire s'est déconnecté. Vous gagnez par défaut !\n");
             exit(EXIT_SUCCESS);
         } else {
             printf("%s\n", buffer);
@@ -54,7 +72,6 @@ void *receive_handler(void *socket_desc) {
     exit(EXIT_FAILURE);
     return 0;
 }
-
 
 int main(int argc, char *argv[]) {
     int sock;
@@ -86,15 +103,19 @@ int main(int argc, char *argv[]) {
     // Send pseudonym to server
     send(sock, pseudo, strlen(pseudo), 0);
 
+    // Create thread to receive messages
     if (pthread_create(&recv_thread, NULL, receive_handler, (void *)&sock) != 0) {
         perror("Thread creation failed");
         exit(EXIT_FAILURE);
     }
 
+    // Handle user input
     while (1) {
         fgets(buffer, MAX_BUFFER_SIZE, stdin);
         buffer[strcspn(buffer, "\n")] = '\0';
-        send(sock, buffer, strlen(buffer), 0);
+        if (strlen(buffer) > 0) {
+            send(sock, buffer, strlen(buffer), 0);
+        }
     }
 
     close(sock);
