@@ -144,7 +144,18 @@ int tour_joueur(int plateau[NB_LIGNES][NB_CASES], int joueur, int *score_j1, int
         if(choix_case < 0 || choix_case >= NB_CASES || plateau[ligne][choix_case] == 0) {
             printf("Choix invalide. Veuillez réessayer.\n");
         } else {
-            break;
+            // Vérifier si le coup ne prive pas l'adversaire de toutes ses graines
+            int total_graines_adversaire = 0;
+            int ligne_adversaire = 1 - ligne;
+            for(int i = 0; i < NB_CASES; i++) {
+                total_graines_adversaire += plateau[ligne_adversaire][i];
+            }
+
+            if(total_graines_adversaire == 0) {
+                printf("Vous ne pouvez pas priver l'adversaire de toutes ses graines.\n");
+            } else {
+                break;
+            }
         }
     } while(1);
 
@@ -168,6 +179,11 @@ void distribuer_graines(int plateau[NB_LIGNES][NB_CASES], int ligne, int case_in
             i++;
         } else if(l == 0) {
             i--;
+        }
+
+        // Sauter la case de départ si on fait un tour complet
+        if(graines == 12 && i == case_index && l == ligne) {
+            continue;
         }
 
         plateau[l][i]++;
