@@ -1,47 +1,18 @@
-# Fichiers sources
-SRC_CLIENT	=	./client/client.c
-SRC_SERVER	=	./server/server.c
-SRC_GAME	=	./game/awale.c
+# Makefile for compiling the Awalé game
 
-# Fichiers objets
-OBJ_CLIENT	=	$(SRC_CLIENT:.c=.o)
-OBJ_SERVER	=	$(SRC_SERVER:.c=.o)
-OBJ_GAME	=	$(SRC_GAME:.c=.o)
+CC = gcc
+CFLAGS = -Wall -pthread
 
-# Noms des exécutables
-NAME_CLIENT	=	cli
-NAME_SERVER	=	serv
-NAME_GAME	=	awale
+SERVER_BIN = server/awale_server
+CLIENT_BIN = client/awale_client
 
-# Flags de compilation
-CFLAGS	=	-W -Wall -Wextra -g
+all: $(SERVER_BIN) $(CLIENT_BIN)
 
-# Compilation de tous les exécutables
-all:	$(NAME_CLIENT) $(NAME_SERVER) $(NAME_GAME)
+$(SERVER_BIN): server/server.c server/server.h
+	$(CC) $(CFLAGS) -o $(SERVER_BIN) server/server.c
 
-# Compilation du client
-$(NAME_CLIENT):	$(OBJ_CLIENT)
-	gcc $(OBJ_CLIENT) -o $(NAME_CLIENT)
-	@echo -e "\033[0;34m<client has been created>\033[00m"
+$(CLIENT_BIN): client/client.c client/client.h
+	$(CC) $(CFLAGS) -o $(CLIENT_BIN) client/client.c
 
-# Compilation du server
-$(NAME_SERVER):	$(OBJ_SERVER)
-	gcc $(OBJ_SERVER) -o $(NAME_SERVER)
-	@echo -e "\033[0;34m<server has been created>\033[00m"
-
-# Compilation du jeu
-$(NAME_GAME):	$(OBJ_GAME)
-	gcc $(OBJ_GAME) -o $(NAME_GAME)
-	@echo -e "\033[0;34m<game has been created>\033[00m"
-
-# Nettoyage des fichiers objets
 clean:
-	@echo -e "\033[0;34m<Deleting useless files>\033[00m"
-	rm -f $(OBJ_CLIENT) $(OBJ_SERVER) $(OBJ_GAME)
-
-# Nettoyage des fichiers objets et exécutables
-fclean: clean
-	rm -f $(NAME_CLIENT) $(NAME_SERVER) $(NAME_GAME)
-
-# Rebuild complet
-re:	fclean all
+	rm -f $(SERVER_BIN) $(CLIENT_BIN)

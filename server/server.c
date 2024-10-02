@@ -1,219 +1,210 @@
 #include "server.h"
 
-int main() {
-    int serveur_socket, client_socket;
-    struct sockaddr_in serveur_addr, client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
+Room rooms[MAX_ROOMS];
+int num_rooms;
 
-    // Création du socket serveur
-    if ((serveur_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("Erreur lors de la création du socket");
-        exit(EXIT_FAILURE);
+void initialize_rooms(int num_rooms) {
+    for (int i = 0; i < num_rooms; i++) {
+        rooms[i].players_connected = 0;
+        rooms[i].current_turn = 0;
+        rooms[i].scores[0] = 0;
+        rooms[i].scores[1] = 0;
+        pthread_mutex_init(&rooms[i].room_mutex, NULL);
+        // Initialize the board with 4 seeds in each pit
+        for (int j = 0; j < 2; j++)
+            for (int k = 0; k < 6; k++)
+                rooms[i].board[j][k] = 4;
     }
+}
 
-    // Configuration de l'adresse du serveur
-    serveur_addr.sin_family = AF_INET;
-    serveur_addr.sin_addr.s_addr = INADDR_ANY;
-    serveur_addr.sin_port = htons(PORT);
-
-    // Liaison du socket à l'adresse
-    if (bind(serveur_socket, (struct sockaddr *)&serveur_addr, sizeof(serveur_addr)) == -1) {
-        perror("Erreur lors du bind");
-        close(serveur_socket);
-        exit(EXIT_FAILURE);
+void update_score_file(const char *winner_pseudo) {
+    FILE *file = fopen("scores.txt", "a");
+    if (file != NULL) {
+        fprintf(file, "%s wins a game\n", winner_pseudo);
+        fclose(file);
     }
+}
 
-    // Mise en écoute du socket
-    if (listen(serveur_socket, 2) == -1) {
-        perror("Erreur lors du listen");
-        close(serveur_socket);
-        exit(EXIT_FAILURE);
+void *handle_client(void *arg) {
+    Player *player = (Player *)arg;
+    char buffer[MAX_BUFFER_SIZE];
+    int bytes_received;
+
+    // Receive pseudo
+    bytes_received = recv(player->socket, player->pseudo, MAX_PSEUDO_LENGTH, 0);
+    if (bytes_received <= 0) {
+        close(player->socket);
+        free(player);
+        pthread_exit(NULL);
     }
+    player->pseudo[bytes_received] = '\0';
 
-    printf("Serveur en attente de connexions sur le port %d...\n", PORT);
-
-    initialiser_plateau();
-
-    // Accepter les connexions des deux clients
-    while (clients_connectes < 2) {
-        if ((client_socket = accept(serveur_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
-            perror("Erreur lors de l'acceptation d'une connexion");
-            continue;
-        }
-
-        clients[clients_connectes].socket = client_socket;
-        clients[clients_connectes].joueur_id = clients_connectes + 1;
-
-        pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, gerer_client, (void *)&clients[clients_connectes]) != 0) {
-            perror("Erreur lors de la création du thread");
-            close(client_socket);
-        } else {
-            pthread_detach(thread_id);
-            clients_connectes++;
-            printf("Joueur %d connecté.\n", clients[clients_connectes - 1].joueur_id);
-        }
-    }
-
-    // Boucle principale du serveur
+    // Send initial room status
     while (1) {
-        sleep(1);
-        if (verifie_fin_jeu()) {
-            printf("Le jeu est terminé.\n");
-            break;
+        // Send room status
+        snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
+        for (int i = 0; i < num_rooms; i++) {
+            char room_info[50];
+            snprintf(room_info, sizeof(room_info), "Room %d: %d player(s) connected\n", i, rooms[i].players_connected);
+            strcat(buffer, room_info);
         }
-    }
+        send(player->socket, buffer, strlen(buffer), 0);
 
-    // Fermeture des sockets
-    for (int i = 0; i < 2; i++) {
-        close(clients[i].socket);
-    }
-    close(serveur_socket);
-    return 0;
-}
-
-void initialiser_plateau() {
-    for (int i = 0; i < NB_LIGNES; i++) {
-        for (int j = 0; j < NB_CASES; j++) {
-            plateau[i][j] = 4;
-        }
-    }
-}
-
-void *gerer_client(void *arg) {
-    ClientInfo *client_info = (ClientInfo *)arg;
-    int client_socket = client_info->socket;
-    int joueur_id = client_info->joueur_id;
-    int ligne = (joueur_id == 1) ? 1 : 0;
-    int fin_jeu = 0;
-
-    // Envoyer le numéro du joueur
-    send(client_socket, &joueur_id, sizeof(int), 0);
-
-    while (!fin_jeu) {
-        pthread_mutex_lock(&mutex);
-
-        // Vérifier si c'est le tour du joueur
-        if (joueur_actuel + 1 != joueur_id) {
-            pthread_mutex_unlock(&mutex);
-            sleep(1);
-            continue;
-        }
-
-        // Envoyer le plateau au joueur
-        envoyer_plateau(client_socket);
-
-        // Recevoir le mouvement du joueur
-        int choix_case;
-        if (recv(client_socket, &choix_case, sizeof(int), 0) <= 0) {
-            printf("Le joueur %d s'est déconnecté.\n", joueur_id);
-            close(client_socket);
-            pthread_mutex_unlock(&mutex);
+        // Receive room selection
+        bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+        if (bytes_received <= 0) {
+            close(player->socket);
+            free(player);
             pthread_exit(NULL);
         }
-
-        choix_case--; // Indexation à partir de 0
-
-        // Vérifier si le mouvement est valide
-        if (!mouvement_valide(ligne, choix_case)) {
-            int invalide = -1;
-            send(client_socket, &invalide, sizeof(int), 0);
-            pthread_mutex_unlock(&mutex);
+        buffer[bytes_received] = '\0';
+        int selected_room = atoi(buffer);
+        if (selected_room < 0 || selected_room >= num_rooms) {
+            send(player->socket, "INVALID_ROOM", 12, 0);
             continue;
         }
 
-        // Distribuer les graines
-        distribuer_graines(ligne, choix_case, &scores[joueur_id - 1]);
-
-        // Vérifier la fin du jeu
-        fin_jeu = verifie_fin_jeu();
-
-        // Changer de joueur
-        joueur_actuel = (joueur_actuel + 1) % 2;
-
-        // Envoyer le plateau mis à jour aux deux joueurs
-        for (int i = 0; i < 2; i++) {
-            envoyer_plateau(clients[i].socket);
+        pthread_mutex_lock(&rooms[selected_room].room_mutex);
+        if (rooms[selected_room].players_connected >= MAX_PLAYERS_PER_ROOM) {
+            pthread_mutex_unlock(&rooms[selected_room].room_mutex);
+            send(player->socket, "ROOM_FULL", 9, 0);
+            continue;
         }
 
-        pthread_mutex_unlock(&mutex);
+        // Assign player to room
+        player->room_id = selected_room;
+        player->player_id = rooms[selected_room].players_connected;
+        rooms[selected_room].players[rooms[selected_room].players_connected++] = player;
+        pthread_mutex_unlock(&rooms[selected_room].room_mutex);
+
+        send(player->socket, "JOINED_ROOM", 11, 0);
+        break;
     }
 
+    // Wait for both players to connect
+    while (rooms[player->room_id].players_connected < MAX_PLAYERS_PER_ROOM) {
+        sleep(1);
+    }
+
+    // Notify players that the game is starting
+    send(player->socket, "GAME_START", 10, 0);
+
+    // Game loop
+    Room *room = &rooms[player->room_id];
+    while (1) {
+        // Lock the room during the game turn
+        pthread_mutex_lock(&room->room_mutex);
+
+        // Check if it's this player's turn
+        if (room->current_turn == player->player_id) {
+            // Send the board state to the player
+            // For simplicity, we'll send a placeholder board state
+            snprintf(buffer, sizeof(buffer), "YOUR_TURN\nBoard State: ...\nEnter your move:");
+            send(player->socket, buffer, strlen(buffer), 0);
+
+            // Receive the player's move
+            bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+            if (bytes_received <= 0) {
+                // Handle disconnection
+                int opponent_id = 1 - player->player_id;
+                Player *opponent = room->players[opponent_id];
+                send(opponent->socket, "OPPONENT_DISCONNECTED", 21, 0);
+                update_score_file(opponent->pseudo);
+                close(player->socket);
+                free(player);
+                pthread_mutex_unlock(&room->room_mutex);
+                pthread_exit(NULL);
+            }
+            buffer[bytes_received] = '\0';
+
+            // Process the move (this is where game logic would go)
+            // For now, we'll just switch turns
+            room->current_turn = 1 - room->current_turn;
+
+            // Send updated board state to both players
+            snprintf(buffer, sizeof(buffer), "BOARD_UPDATE\nBoard State: ...\n");
+            for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+                send(room->players[i]->socket, buffer, strlen(buffer), 0);
+            }
+        } else {
+            // Send waiting message
+            snprintf(buffer, sizeof(buffer), "WAITING_FOR_OPPONENT\n");
+            send(player->socket, buffer, strlen(buffer), 0);
+        }
+
+        pthread_mutex_unlock(&room->room_mutex);
+
+        // Small delay to prevent busy waiting
+        sleep(1);
+    }
+
+    close(player->socket);
+    free(player);
     pthread_exit(NULL);
 }
 
-void envoyer_plateau(int socket) {
-    // Envoyer le plateau
-    send(socket, plateau, sizeof(plateau), 0);
 
-    // Envoyer les scores
-    send(socket, scores, sizeof(scores), 0);
+int main(int argc, char *argv[]) {
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    pthread_t thread_id;
 
-    // Envoyer le numéro du joueur actuel
-    int joueur_envoyer = joueur_actuel + 1;
-    send(socket, &joueur_envoyer, sizeof(int), 0);
-}
-
-int verifie_fin_jeu() {
-    int graines_joueur[2] = {0, 0};
-
-    for (int i = 0; i < NB_CASES; i++) {
-        graines_joueur[0] += plateau[1][i]; // Joueur 1
-        graines_joueur[1] += plateau[0][i]; // Joueur 2
+    if (argc != 2) {
+        printf("Usage: %s <number_of_rooms>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
-    if (graines_joueur[0] == 0 || graines_joueur[1] == 0) {
-        printf("Fin du jeu. Score Joueur 1: %d, Score Joueur 2: %d\n", scores[0], scores[1]);
-        return 1;
+    num_rooms = atoi(argv[1]);
+    if (num_rooms <= 0 || num_rooms > MAX_ROOMS) {
+        printf("Invalid number of rooms. Max allowed is %d.\n", MAX_ROOMS);
+        exit(EXIT_FAILURE);
     }
 
+    initialize_rooms(num_rooms);
+
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    memset(&(server_addr.sin_zero), '\0', 8);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0) {
+        perror("Binding failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(server_socket, 10) < 0) {
+        perror("Listening failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server started on port %d with %d rooms.\n", PORT, num_rooms);
+
+    while (1) {
+        socklen_t sin_size = sizeof(struct sockaddr_in);
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &sin_size);
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        Player *new_player = (Player *)malloc(sizeof(Player));
+        new_player->socket = client_socket;
+        new_player->room_id = -1;
+
+        if (pthread_create(&thread_id, NULL, handle_client, (void *)new_player) != 0) {
+            perror("Thread creation failed");
+            free(new_player);
+            continue;
+        }
+        pthread_detach(thread_id);
+    }
+
+    close(server_socket);
     return 0;
-}
-
-int mouvement_valide(int ligne, int choix_case) {
-    if (choix_case < 0 || choix_case >= NB_CASES) {
-        return 0;
-    }
-    if (plateau[ligne][choix_case] == 0) {
-        return 0;
-    }
-    return 1;
-}
-
-void distribuer_graines(int ligne, int case_index, int *score_joueur) {
-    int graines = plateau[ligne][case_index];
-    plateau[ligne][case_index] = 0;
-    int l = ligne;
-    int i = case_index;
-
-    while (graines > 0) {
-        // Avancer à la case suivante
-        if (l == 1 && i == NB_CASES - 1) {
-            l = 0; // Passer à la ligne du haut
-        } else if (l == 0 && i == 0) {
-            l = 1; // Passer à la ligne du bas
-        } else if (l == 1) {
-            i++;
-        } else if (l == 0) {
-            i--;
-        }
-
-        plateau[l][i]++;
-        graines--;
-    }
-
-    // Gestion des captures
-    while ((l == 1 - ligne) && (plateau[l][i] == 2 || plateau[l][i] == 3)) {
-        *score_joueur += plateau[l][i];
-        plateau[l][i] = 0;
-
-        // Reculer à la case précédente
-        if (l == 1 && i > 0) {
-            i--;
-        } else if (l == 0 && i < NB_CASES - 1) {
-            i++;
-        } else {
-            break;
-        }
-    }
 }
