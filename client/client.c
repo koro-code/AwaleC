@@ -73,43 +73,59 @@ void *receive_handler(void *socket_desc) {
     return 0;
 }
 
+
 int main(int argc, char *argv[]) {
     int sock;
     struct sockaddr_in server_addr;
     char pseudo[MAX_PSEUDO_LENGTH];
     char buffer[MAX_BUFFER_SIZE];
     pthread_t recv_thread;
+    char *server_ip;
+
+    // Utiliser l'IP fournie en argument, sinon 127.0.0.1 par défaut
+    if (argc > 1) {
+        server_ip = argv[1];
+    } else {
+        server_ip = "127.0.0.1";
+    }
 
     printf("Enter your pseudonym (max %d characters): ", MAX_PSEUDO_LENGTH);
     fgets(pseudo, MAX_PSEUDO_LENGTH, stdin);
     pseudo[strcspn(pseudo, "\n")] = '\0';
 
+    // Création du socket
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
 
+    // Configuration de l'adresse du serveur
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
-    // Replace "127.0.0.1" with the server's IP if necessary
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
+    // Conversion de l'IP du serveur en format réseau
+    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
+        perror("Invalid IP address");
+        exit(EXIT_FAILURE);
+    }
+
+    // Connexion au serveur
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Connection failed");
         exit(EXIT_FAILURE);
     }
 
-    // Send pseudonym to server
+    // Envoi du pseudonyme au serveur
     send(sock, pseudo, strlen(pseudo), 0);
 
-    // Create thread to receive messages
+    // Création du thread pour recevoir les messages
     if (pthread_create(&recv_thread, NULL, receive_handler, (void *)&sock) != 0) {
         perror("Thread creation failed");
         exit(EXIT_FAILURE);
     }
 
-    // Handle user input
+    // Gestion de l'entrée utilisateur
     while (1) {
         fgets(buffer, MAX_BUFFER_SIZE, stdin);
         buffer[strcspn(buffer, "\n")] = '\0';
