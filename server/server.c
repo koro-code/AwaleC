@@ -37,8 +37,8 @@ char* format_board(Room *room, int player_id) {
     static char board_str[2048];
     int opponent_id = 1 - player_id;
 
-    snprintf(board_str, sizeof(board_str), "\n\t\t\tJoueur %d\n", opponent_id + 1);
-    strcat(board_str, "\t[1]\t[2]\t[3]\t[4]\t[5]\t[6]\n");
+    snprintf(board_str, sizeof(board_str), "\n\t\t     Joueur %d\n", opponent_id + 1);
+    strcat(board_str, "\t[1]   [2]   [3]   [4]   [5]   [6]\n");
     strcat(board_str, " +----+-----+-----+-----+-----+-----+-----+----+\n");
     snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
              " |    |  %2d |  %2d |  %2d |  %2d |  %2d |  %2d |    |\n",
@@ -52,9 +52,9 @@ char* format_board(Room *room, int player_id) {
              room->board[player_id][0], room->board[player_id][1], room->board[player_id][2],
              room->board[player_id][3], room->board[player_id][4], room->board[player_id][5]);
     strcat(board_str, " +----+-----+-----+-----+-----+-----+-----+----+\n");
-    strcat(board_str, "\t[1]\t[2]\t[3]\t[4]\t[5]\t[6]\n");
+    strcat(board_str, "\t[1]   [2]   [3]   [4]   [5]   [6]\n");
     snprintf(board_str + strlen(board_str), sizeof(board_str) - strlen(board_str),
-             "\t\t\tJoueur %d\n", player_id + 1);
+             "\t\t     Joueur %d\n", player_id + 1);
 
     return board_str;
 }
@@ -106,8 +106,18 @@ int is_game_over(Room *room) {
         if (room->board[0][i] > 0) player1_empty = 0;
         if (room->board[1][i] > 0) player2_empty = 0;
     }
+
+    // Check if any player has reached 25 or more points
+    int player1_score = room->scores[0];
+    int player2_score = room->scores[1];
+    
+    if (player1_score >= 25 || player2_score >= 25) {
+        return 1; // Game over if a player has 25 or more points
+    }
+
     return player1_empty || player2_empty;
 }
+
 
 int determine_winner(Room *room) {
     // Compare scores to determine the winner

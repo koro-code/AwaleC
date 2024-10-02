@@ -14,13 +14,15 @@ void *receive_handler(void *socket_desc) {
         // Handle different server messages
         if (strncmp(buffer, "ROOM_STATUS", 11) == 0) {
             printf("+------------------------------------------------------------------+\n");
-            printf("|   Voici les rooms disponibles :                                   |\n");
+            printf("|   Voici les rooms disponibles :                                  |\n");
             printf("|                                                                  |\n");
             char *room_info = buffer + 12;
             char *line = strtok(room_info, "\n");
             while (line != NULL) {
                 printf("|  --------------------------------------------------------------  |\n");
-                printf("|  | %s |  |\n", line);
+                printf("|  | %s | \t\t\t\t   |\n", line);
+                printf("|  --------------------------------------------------------------  |\n");
+                printf("|                                                                  |\n");
                 line = strtok(NULL, "\n");
             }
             printf("|                                                                  |\n");
