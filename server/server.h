@@ -36,7 +36,7 @@ typedef struct {
 void *handle_client(void *arg);
 void initialize_rooms(int num_rooms);
 void update_score_file(const char *winner_pseudo);
-void send_board_state(int socket, Room *room, int player_id);
+int send_board_state(int socket, Room *room, int player_id);
 char* format_board(Room *room, int player_id);
 void execute_move(Room *room, int player_id, int pit_choice);
 int is_game_over(Room *room);

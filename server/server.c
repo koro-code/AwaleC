@@ -1,5 +1,7 @@
 // server.c
 #include "server.h"
+#include <signal.h>
+
 
 Room rooms[MAX_ROOMS];
 int num_rooms;
@@ -42,11 +44,13 @@ void update_score_file(const char *winner_pseudo) {
     }
 }
 
-void send_board_state(int socket, Room *room, int player_id) {
+int send_board_state(int socket, Room *room, int player_id) {
     char buffer[MAX_BUFFER_SIZE];
-    snprintf(buffer, sizeof(buffer), "BOARD_STATE\n%s", format_board(room, player_id));
-    send(socket, buffer, strlen(buffer), 0);
+    snprintf(buffer, sizeof(buffer), "CLEAR_SCREEN\nBOARD_STATE\n%s", format_board(room, player_id));
+    return send(socket, buffer, strlen(buffer), 0);
 }
+
+
 
 char* format_board(Room *room, int player_id) {
     static char board_str[2048];
@@ -168,7 +172,7 @@ void handle_disconnect(Player *player) {
     disconnected_players[num_disconnected].room = room;
     num_disconnected++;
 
-    // Informer l'adversaire
+    // Informer l'autre joueur
     int opponent_id = 1 - player->player_id;
     Player *opponent = room->players[opponent_id];
     if (opponent != NULL) {
@@ -180,6 +184,7 @@ void handle_disconnect(Player *player) {
     close(player->socket);
     free(player);
 }
+
 
 
 
@@ -299,92 +304,125 @@ void *handle_client(void *arg) {
     int game_over = 0;
 
     while (!game_over) {
-        pthread_mutex_lock(&room->room_mutex);
+    pthread_mutex_lock(&room->room_mutex);
 
-        // Mettre à jour l'adversaire
-        opponent = room->players[opponent_id];
+    // Mettre à jour l'adversaire
+    opponent = room->players[opponent_id];
 
-        // Vérifier si l'adversaire est déconnecté
-        if (opponent == NULL) {
-            send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+    // Vérifier si l'adversaire est déconnecté
+    if (opponent == NULL) {
+        // Informer le joueur que l'adversaire est déconnecté
+        send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+    }
+
+    // Vérifier si c'est le tour du joueur
+    if (room->current_turn == player->player_id) {
+        // C'est le tour du joueur courant
+        // Envoyer l'état du plateau au joueur
+        send_board_state(player->socket, room, player->player_id);
+
+        // Demander au joueur son coup
+        send(player->socket, "YOUR_TURN\nEntrez le numéro de la case (1-6): ", 46, 0);
+
+        // Recevoir le coup du joueur
+        bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+        if (bytes_received <= 0) {
+            // Gérer la déconnexion du joueur courant
+            if (bytes_received == 0) {
+                printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+            } else {
+                perror("Erreur lors de la réception des données");
+            }
+
+            // Déverrouiller le mutex avant d'appeler handle_disconnect
             pthread_mutex_unlock(&room->room_mutex);
-            sleep(1);
-            continue;
+
+            // Gérer la déconnexion
+            handle_disconnect(player);
+
+            pthread_exit(NULL);
         }
+        buffer[bytes_received] = '\0';
+        int pit_choice = atoi(buffer) - 1; // Convertir en index 0-based
 
-        // Vérifier si c'est le tour du joueur
-        if (room->current_turn == player->player_id) {
-            // Envoyer l'état du plateau au joueur
-            send_board_state(player->socket, room, player->player_id);
+        // Valider le coup
+        if (pit_choice < 0 || pit_choice >= NUM_PITS || room->board[player->player_id][pit_choice] == 0) {
+            send(player->socket, "INVALID_MOVE", 12, 0);
+        } else {
+            // Exécuter le coup
+            execute_move(room, player->player_id, pit_choice);
 
-            // Demander au joueur son coup
-            send(player->socket, "YOUR_TURN\nEntrez le numéro de la case (1-6): ", 46, 0);
-
-            // Recevoir le coup du joueur
-            bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
-            if (bytes_received <= 0) {
-                // Le client a fermé la connexion ou une erreur est survenue
-                if (bytes_received == 0) {
-                    printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+            // Vérifier la condition de fin de partie
+            if (is_game_over(room)) {
+                game_over = 1;
+                // Déterminer le gagnant et mettre à jour les scores
+                int winner_id = determine_winner(room);
+                if (winner_id == -1) {
+                    send_to_both_players(room, "GAME_OVER\nMatch nul !");
                 } else {
-                    perror("Erreur lors de la réception des données");
+                    char win_msg[50];
+                    snprintf(win_msg, sizeof(win_msg), "GAME_OVER\n%s gagne la partie !", room->players[winner_id]->pseudo);
+                    send_to_both_players(room, win_msg);
+                    update_score_file(room->players[winner_id]->pseudo);
                 }
+            } else {
+                // Changer de tour
+                room->current_turn = opponent_id;
 
+                // Envoyer le plateau mis à jour au joueur courant
+                send_board_state(player->socket, room, player->player_id);
+
+                // Vérifier si l'adversaire est connecté avant de lui envoyer le plateau
+                if (opponent != NULL) {
+                    // Envoyer le plateau mis à jour à l'adversaire
+                    if (send_board_state(opponent->socket, room, opponent_id) <= 0) {
+                        // L'envoi a échoué, l'adversaire est probablement déconnecté
+                        printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
+                        // Supprimer l'adversaire de la room
+                        handle_disconnect(opponent);
+                    }
+                } else {
+                    // Informer le joueur courant que l'adversaire est déconnecté
+                    send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+                }
+            }
+        }
+    } else {
+        // C'est le tour de l'adversaire
+        if (opponent == NULL) {
+            // L'adversaire est déconnecté, informer le joueur
+            send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+        } else {
+            // Envoyer un message d'attente
+            if (send(player->socket, "WAITING_FOR_OPPONENT", 20, 0) <= 0) {
+                // L'envoi a échoué, le joueur courant est déconnecté
+                printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
                 pthread_mutex_unlock(&room->room_mutex);
-                // Gérer la déconnexion
                 handle_disconnect(player);
                 pthread_exit(NULL);
             }
-            buffer[bytes_received] = '\0';
-            int pit_choice = atoi(buffer) - 1; // Convertir en index 0-based
 
-            // Valider le coup
-            if (pit_choice < 0 || pit_choice >= NUM_PITS || room->board[player->player_id][pit_choice] == 0) {
-                send(player->socket, "INVALID_MOVE", 12, 0);
-            } else {
-                // Exécuter le coup
-                execute_move(room, player->player_id, pit_choice);
-
-                // Vérifier la condition de fin de partie
-                if (is_game_over(room)) {
-                    game_over = 1;
-                    // Déterminer le gagnant et mettre à jour les scores
-                    int winner_id = determine_winner(room);
-                    if (winner_id == -1) {
-                        send_to_both_players(room, "GAME_OVER\nMatch nul !");
-                    } else {
-                        char win_msg[50];
-                        snprintf(win_msg, sizeof(win_msg), "GAME_OVER\n%s gagne la partie !", room->players[winner_id]->pseudo);
-                        send_to_both_players(room, win_msg);
-                        update_score_file(room->players[winner_id]->pseudo);
-                    }
-                } else {
-                    // Changer de tour
-                    room->current_turn = opponent_id;
-                    // Envoyer le plateau mis à jour aux deux joueurs
-                    send_board_state(opponent->socket, room, opponent_id);
-                    send_board_state(player->socket, room, player->player_id);
-                }
+            // Envoyer un message à l'adversaire pour détecter s'il est toujours connecté
+            if (send(opponent->socket, "KEEP_ALIVE", 10, 0) <= 0) {
+                // L'envoi a échoué, l'adversaire est déconnecté
+                printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
+                handle_disconnect(opponent);
             }
-        } else {
-            // Envoyer un message d'attente
-            send(player->socket, "WAITING_FOR_OPPONENT", 20, 0);
         }
-
-        pthread_mutex_unlock(&room->room_mutex);
-        sleep(1); // Pour éviter le busy waiting
     }
 
-    // Fermeture des connexions
-    close(player->socket);
-    free(player);
-    pthread_exit(NULL);
+    pthread_mutex_unlock(&room->room_mutex);
+    sleep(1); // Pour éviter le busy waiting
+}
+  sleep(1); // Pour éviter le busy waiting
+    
 }
 
 int main(int argc, char *argv[]) {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     pthread_t thread_id;
+    signal(SIGPIPE, SIG_IGN);
 
     if (argc != 2) {
         printf("Usage: %s <nombre_de_rooms>\n", argv[0]);

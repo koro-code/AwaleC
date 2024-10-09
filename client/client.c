@@ -121,8 +121,15 @@ int main(int argc, char *argv[]) {
                 printf("Reconnexion à votre partie en cours...\n");
             } else if (strcmp(recv_buffer, "OPPONENT_RECONNECTED") == 0) {
                 printf("Votre adversaire s'est reconnecté. La partie reprend.\n");
-            } else if (strcmp(recv_buffer, "OPPONENT_DISCONNECTED") == 0) {
-                printf("Votre adversaire s'est déconnecté. En attente de sa reconnexion...\n");
+            } else if (strncmp(recv_buffer, "CLEAR_SCREEN", 12) == 0) {
+                system("clear");
+                // Trouver la position de "BOARD_STATE\n"
+                char *board_state = strstr(recv_buffer, "BOARD_STATE\n");
+                if (board_state != NULL) {
+                    printf("%s", board_state + 11); // Afficher l'état du plateau
+                }
+            } else if (strncmp(recv_buffer, "BOARD_STATE", 11) == 0) {
+                printf("%s", recv_buffer + 11);
             } else if (strncmp(recv_buffer, "YOUR_TURN", 9) == 0) {
                 printf("%s", recv_buffer + 9);
                 printf("\nEntrez votre coup : ");
