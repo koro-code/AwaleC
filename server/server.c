@@ -35,9 +35,58 @@ void initialize_rooms(int num_rooms) {
 }
 
 void update_score_file(const char *winner_pseudo) {
-    FILE *file = fopen("scores.txt", "a");
-    if (file != NULL) {
-        fprintf(file, "%s gagne une partie\n", winner_pseudo);
+    FILE *file = fopen("scores.txt", "r");
+    if (!file) {
+        // Le fichier n'existe pas, le créer et écrire le score du gagnant
+        file = fopen("scores.txt", "w");
+        if (file) {
+            fprintf(file, "%s %d\n", winner_pseudo, 1);
+            fclose(file);
+        }
+        return;
+    }
+
+    // Lire les scores existants
+    char line[MAX_BUFFER_SIZE];
+    int found = 0;
+
+    // Stocker les scores en mémoire
+    typedef struct {
+        char pseudo[MAX_PSEUDO_LENGTH];
+        int score;
+    } ScoreEntry;
+
+    ScoreEntry scores[100]; // Maximum de 100 entrées
+    int num_scores = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        char pseudo[MAX_PSEUDO_LENGTH];
+        int score;
+        if (sscanf(line, "%s %d", pseudo, &score) == 2) {
+            if (strcmp(pseudo, winner_pseudo) == 0) {
+                score += 1;
+                found = 1;
+            }
+            strcpy(scores[num_scores].pseudo, pseudo);
+            scores[num_scores].score = score;
+            num_scores++;
+        }
+    }
+    fclose(file);
+
+    if (!found) {
+        // Le gagnant n'est pas dans la liste, l'ajouter
+        strcpy(scores[num_scores].pseudo, winner_pseudo);
+        scores[num_scores].score = 1;
+        num_scores++;
+    }
+
+    // Écrire les scores mis à jour dans le fichier
+    file = fopen("scores.txt", "w");
+    if (file) {
+        for (int i = 0; i < num_scores; i++) {
+            fprintf(file, "%s %d\n", scores[i].pseudo, scores[i].score);
+        }
         fclose(file);
     }
 }
