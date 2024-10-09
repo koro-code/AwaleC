@@ -85,7 +85,11 @@ int main(int argc, char *argv[]) {
             recv_buffer[bytes_received] = '\0';
 
             // Traitement du message reçu
-            if (strncmp(recv_buffer, "ROOM_STATUS", 11) == 0) {
+            if (strncmp(recv_buffer, "GAME_OVER", 9) == 0) {
+                printf("%s\n", recv_buffer + 9);
+                printf("Voulez-vous rejouer ? (oui/non): ");
+                fflush(stdout);
+            } else if (strncmp(recv_buffer, "ROOM_STATUS", 11) == 0) {
                 // Effacer le terminal
                 system("clear");
 
@@ -143,9 +147,6 @@ int main(int argc, char *argv[]) {
                 printf("Mouvement invalide. Veuillez réessayer.\n");
                 printf("Entrez votre coup : ");
                 fflush(stdout);
-            } else if (strncmp(recv_buffer, "GAME_OVER", 9) == 0) {
-                printf("%s\n", recv_buffer + 9);
-                exit(EXIT_SUCCESS);
             } else if (strcmp(recv_buffer, "ENTER_CHAT_MODE") == 0) {
                 in_chat_mode = 1;
                 system("clear");
@@ -170,10 +171,15 @@ int main(int argc, char *argv[]) {
             if (fgets(send_buffer, MAX_BUFFER_SIZE, stdin) != NULL) {
                 send_buffer[strcspn(send_buffer, "\n")] = '\0';
                 if (strlen(send_buffer) > 0) {
-                    if (strcmp(send_buffer, "exit") == 0 || strcmp(send_buffer, "disconnect") == 0) {
+                    if (strcmp(send_buffer, "exit") == 0 || strcmp(send_buffer, "disconnect") == 0 || strcmp(send_buffer, "non") == 0) {
                         printf("Déconnexion...\n");
                         close(sock);
                         exit(EXIT_SUCCESS);
+                    } else if (strcmp(send_buffer, "oui") == 0) {
+                        // Envoyer la réponse au serveur
+                        send(sock, send_buffer, strlen(send_buffer), 0);
+                        in_chat_mode = 0; // Réinitialiser le mode chat
+                        continue;
                     }
                     if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0) {
                         send(sock, send_buffer, strlen(send_buffer), 0);
