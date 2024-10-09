@@ -1,19 +1,16 @@
 // server.c
 #include "server.h"
 #include <signal.h>
-
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
 
 Room rooms[MAX_ROOMS];
 int num_rooms;
 
 // Structure pour stocker les joueurs déconnectés
-typedef struct DisconnectedPlayer {
-    char pseudo[MAX_PSEUDO_LENGTH];
-    int room_id;
-    int player_id;
-    Room *room;
-} DisconnectedPlayer;
-
 DisconnectedPlayer disconnected_players[2];
 int num_disconnected = 0;
 
@@ -24,6 +21,7 @@ void initialize_rooms(int num_rooms) {
         rooms[i].scores[0] = 0;
         rooms[i].scores[1] = 0;
         pthread_mutex_init(&rooms[i].room_mutex, NULL);
+        rooms[i].chat_history_count = 0; // Initialiser le compteur de l'historique du chat
         // Initialiser le plateau avec 4 graines dans chaque case
         for (int row = 0; row < NUM_ROWS; row++) {
             for (int pit = 0; pit < NUM_PITS; pit++) {
@@ -49,8 +47,6 @@ int send_board_state(int socket, Room *room, int player_id) {
     snprintf(buffer, sizeof(buffer), "CLEAR_SCREEN\nBOARD_STATE\n%s", format_board(room, player_id));
     return send(socket, buffer, strlen(buffer), 0);
 }
-
-
 
 char* format_board(Room *room, int player_id) {
     static char board_str[2048];
@@ -129,7 +125,7 @@ int is_game_over(Room *room) {
     // Vérifier si un joueur a atteint 25 points ou plus
     int player1_score = room->scores[0];
     int player2_score = room->scores[1];
-    
+
     if (player1_score >= 25 || player2_score >= 25) {
         return 1; // Fin de partie si un joueur a 25 points ou plus
     }
@@ -185,13 +181,11 @@ void handle_disconnect(Player *player) {
     free(player);
 }
 
-
-
-
 void *handle_client(void *arg) {
     Player *player = (Player *)arg;
     char buffer[MAX_BUFFER_SIZE];
     int bytes_received;
+    player->has_sent_waiting_message = 0; // Initialiser l'indicateur
 
     // Recevoir le pseudo
     bytes_received = recv(player->socket, player->pseudo, MAX_PSEUDO_LENGTH, 0);
@@ -201,6 +195,7 @@ void *handle_client(void *arg) {
         pthread_exit(NULL);
     }
     player->pseudo[bytes_received] = '\0';
+    player->in_chat_mode = 0; // Initialiser le mode chat du joueur
 
     // Vérifier si le joueur a une partie en cours
     int reconnected = 0;
@@ -304,118 +299,233 @@ void *handle_client(void *arg) {
     int game_over = 0;
 
     while (!game_over) {
-    pthread_mutex_lock(&room->room_mutex);
+        pthread_mutex_lock(&room->room_mutex);
 
-    // Mettre à jour l'adversaire
-    opponent = room->players[opponent_id];
+        // Mettre à jour l'adversaire
+        opponent = room->players[opponent_id];
 
-    // Vérifier si l'adversaire est déconnecté
-    if (opponent == NULL) {
-        // Informer le joueur que l'adversaire est déconnecté
-        send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
-    }
-
-    // Vérifier si c'est le tour du joueur
-    if (room->current_turn == player->player_id) {
-        // C'est le tour du joueur courant
-        // Envoyer l'état du plateau au joueur
-        send_board_state(player->socket, room, player->player_id);
-
-        // Demander au joueur son coup
-        send(player->socket, "YOUR_TURN\nEntrez le numéro de la case (1-6): ", 46, 0);
-
-        // Recevoir le coup du joueur
-        bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
-        if (bytes_received <= 0) {
-            // Gérer la déconnexion du joueur courant
-            if (bytes_received == 0) {
-                printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
-            } else {
-                perror("Erreur lors de la réception des données");
-            }
-
-            // Déverrouiller le mutex avant d'appeler handle_disconnect
-            pthread_mutex_unlock(&room->room_mutex);
-
-            // Gérer la déconnexion
-            handle_disconnect(player);
-
-            pthread_exit(NULL);
+        // Vérifier si l'adversaire est déconnecté
+        if (opponent == NULL) {
+            // Informer le joueur que l'adversaire est déconnecté
+            send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
         }
-        buffer[bytes_received] = '\0';
-        int pit_choice = atoi(buffer) - 1; // Convertir en index 0-based
 
-        // Valider le coup
-        if (pit_choice < 0 || pit_choice >= NUM_PITS || room->board[player->player_id][pit_choice] == 0) {
-            send(player->socket, "INVALID_MOVE", 12, 0);
-        } else {
-            // Exécuter le coup
-            execute_move(room, player->player_id, pit_choice);
+        // Recevoir les messages du client sans bloquer
+        pthread_mutex_unlock(&room->room_mutex); // Déverrouiller pour éviter les blocages
+        bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, MSG_DONTWAIT);
+        pthread_mutex_lock(&room->room_mutex); // Re-verrouiller
 
-            // Vérifier la condition de fin de partie
-            if (is_game_over(room)) {
-                game_over = 1;
-                // Déterminer le gagnant et mettre à jour les scores
-                int winner_id = determine_winner(room);
-                if (winner_id == -1) {
-                    send_to_both_players(room, "GAME_OVER\nMatch nul !");
-                } else {
-                    char win_msg[50];
-                    snprintf(win_msg, sizeof(win_msg), "GAME_OVER\n%s gagne la partie !", room->players[winner_id]->pseudo);
-                    send_to_both_players(room, win_msg);
-                    update_score_file(room->players[winner_id]->pseudo);
+        if (bytes_received > 0) {
+            buffer[bytes_received] = '\0';
+
+            // Vérifier si le joueur souhaite passer en mode chat ou jeu
+            if (strcmp(buffer, "/chat") == 0) {
+                player->in_chat_mode = 1;
+                send(player->socket, "ENTER_CHAT_MODE", 15, 0);
+
+                // Envoyer l'historique du chat au joueur
+                char chat_history_buffer[MAX_BUFFER_SIZE];
+                strcpy(chat_history_buffer, "CHAT_HISTORY\n");
+                for (int i = 0; i < room->chat_history_count; i++) {
+                    strcat(chat_history_buffer, room->chat_history[i]);
+                    strcat(chat_history_buffer, "\n");
                 }
-            } else {
-                // Changer de tour
-                room->current_turn = opponent_id;
+                send(player->socket, chat_history_buffer, strlen(chat_history_buffer), 0);
 
-                // Envoyer le plateau mis à jour au joueur courant
+                pthread_mutex_unlock(&room->room_mutex);
+                continue;
+            } else if (strcmp(buffer, "/game") == 0) {
+                player->in_chat_mode = 0;
+                send(player->socket, "ENTER_GAME_MODE", 15, 0);
+
+                // Si ce n'est pas le tour du joueur, réinitialiser l'indicateur pour qu'il reçoive le message d'attente
+                if (room->current_turn != player->player_id) {
+                    player->has_sent_waiting_message = 0;
+                }
+
+                // Envoyer le plateau de jeu au joueur
                 send_board_state(player->socket, room, player->player_id);
 
-                // Vérifier si l'adversaire est connecté avant de lui envoyer le plateau
-                if (opponent != NULL) {
-                    // Envoyer le plateau mis à jour à l'adversaire
-                    if (send_board_state(opponent->socket, room, opponent_id) <= 0) {
-                        // L'envoi a échoué, l'adversaire est probablement déconnecté
-                        printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
-                        // Supprimer l'adversaire de la room
-                        handle_disconnect(opponent);
-                    }
-                } else {
-                    // Informer le joueur courant que l'adversaire est déconnecté
-                    send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
-                }
+                pthread_mutex_unlock(&room->room_mutex);
+                continue;
             }
-        }
-    } else {
-        // C'est le tour de l'adversaire
-        if (opponent == NULL) {
-            // L'adversaire est déconnecté, informer le joueur
-            send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+
+            if (player->in_chat_mode) {
+                // Traiter le message de chat
+                // Ajouter le message à l'historique du chat
+                if (room->chat_history_count < CHAT_HISTORY_SIZE) {
+                    snprintf(room->chat_history[room->chat_history_count], MAX_MESSAGE_LENGTH, "%s: %s", player->pseudo, buffer);
+                    room->chat_history_count++;
+                } else {
+                    // Si l'historique est plein, décaler les messages
+                    for (int i = 1; i < CHAT_HISTORY_SIZE; i++) {
+                        strcpy(room->chat_history[i - 1], room->chat_history[i]);
+                    }
+                    snprintf(room->chat_history[CHAT_HISTORY_SIZE - 1], MAX_MESSAGE_LENGTH, "%s: %s", player->pseudo, buffer);
+                }
+
+                // Diffuser le message à tous les joueurs de la room
+                for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+                    if (room->players[i] != NULL) {
+                        char chat_update[MAX_BUFFER_SIZE];
+                        snprintf(chat_update, sizeof(chat_update), "CHAT_UPDATE\n%s: %s", player->pseudo, buffer);
+                        send(room->players[i]->socket, chat_update, strlen(chat_update), 0);
+                    }
+                }
+
+                pthread_mutex_unlock(&room->room_mutex);
+                continue;
+            }
+        } else if (bytes_received == 0) {
+            // Le client a fermé la connexion
+            printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+            pthread_mutex_unlock(&room->room_mutex);
+            handle_disconnect(player);
+            pthread_exit(NULL);
         } else {
-            // Envoyer un message d'attente
-            if (send(player->socket, "WAITING_FOR_OPPONENT", 20, 0) <= 0) {
-                // L'envoi a échoué, le joueur courant est déconnecté
-                printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+            // Gérer les erreurs de recv()
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                perror("Erreur lors de la réception des données");
                 pthread_mutex_unlock(&room->room_mutex);
                 handle_disconnect(player);
                 pthread_exit(NULL);
             }
+            // Si errno est EAGAIN ou EWOULDBLOCK, aucune donnée n'est disponible, continuer
+        }
 
-            // Envoyer un message à l'adversaire pour détecter s'il est toujours connecté
-            if (send(opponent->socket, "KEEP_ALIVE", 10, 0) <= 0) {
-                // L'envoi a échoué, l'adversaire est déconnecté
-                printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
-                handle_disconnect(opponent);
+        // Vérifier si c'est le tour du joueur
+        if (room->current_turn == player->player_id && !player->in_chat_mode) {
+            // C'est le tour du joueur courant
+            // Envoyer l'état du plateau au joueur
+            send_board_state(player->socket, room, player->player_id);
+
+            // Demander au joueur son coup
+            send(player->socket, "YOUR_TURN\nEntrez le numéro de la case (1-6): ", 46, 0);
+
+            // Recevoir le coup du joueur
+            bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+            if (bytes_received <= 0) {
+                // Gérer la déconnexion du joueur courant
+                if (bytes_received == 0) {
+                    printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+                } else {
+                    perror("Erreur lors de la réception des données");
+                }
+
+                // Déverrouiller le mutex avant d'appeler handle_disconnect
+                pthread_mutex_unlock(&room->room_mutex);
+
+                // Gérer la déconnexion
+                handle_disconnect(player);
+
+                pthread_exit(NULL);
+            }
+            buffer[bytes_received] = '\0';
+
+            // Vérifier si le joueur souhaite passer en mode chat
+            if (strcmp(buffer, "/chat") == 0) {
+                player->in_chat_mode = 1;
+                send(player->socket, "ENTER_CHAT_MODE", 15, 0);
+
+                // Envoyer l'historique du chat au joueur
+                char chat_history_buffer[MAX_BUFFER_SIZE];
+                strcpy(chat_history_buffer, "CHAT_HISTORY\n");
+                for (int i = 0; i < room->chat_history_count; i++) {
+                    strcat(chat_history_buffer, room->chat_history[i]);
+                    strcat(chat_history_buffer, "\n");
+                }
+                send(player->socket, chat_history_buffer, strlen(chat_history_buffer), 0);
+
+                pthread_mutex_unlock(&room->room_mutex);
+                continue;
+            }
+
+            int pit_choice = atoi(buffer) - 1; // Convertir en index 0-based
+
+            // Valider le coup
+            if (pit_choice < 0 || pit_choice >= NUM_PITS || room->board[player->player_id][pit_choice] == 0) {
+                send(player->socket, "INVALID_MOVE", 12, 0);
+            } else {
+                // Exécuter le coup
+                execute_move(room, player->player_id, pit_choice);
+
+                // Vérifier la condition de fin de partie
+                if (is_game_over(room)) {
+                    game_over = 1;
+                    // Déterminer le gagnant et mettre à jour les scores
+                    int winner_id = determine_winner(room);
+                    if (winner_id == -1) {
+                        send_to_both_players(room, "GAME_OVER\nMatch nul !");
+                    } else {
+                        char win_msg[50];
+                        snprintf(win_msg, sizeof(win_msg), "GAME_OVER\n%s gagne la partie !", room->players[winner_id]->pseudo);
+                        send_to_both_players(room, win_msg);
+                        update_score_file(room->players[winner_id]->pseudo);
+                    }
+                } else {
+                    // Changer de tour
+                    room->current_turn = opponent_id;
+
+                    // Réinitialiser l'indicateur pour les deux joueurs
+                    for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+                        if (room->players[i] != NULL) {
+                            room->players[i]->has_sent_waiting_message = 0;
+                        }
+                    }
+
+                    // Envoyer le plateau mis à jour au joueur courant
+                    send_board_state(player->socket, room, player->player_id);
+
+                    // Vérifier si l'adversaire est connecté avant de lui envoyer le plateau
+                    if (opponent != NULL) {
+                        // Envoyer le plateau mis à jour à l'adversaire
+                        if (send_board_state(opponent->socket, room, opponent_id) <= 0) {
+                            // L'envoi a échoué, l'adversaire est probablement déconnecté
+                            printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
+                            // Supprimer l'adversaire de la room
+                            handle_disconnect(opponent);
+                        }
+                    } else {
+                        // Informer le joueur courant que l'adversaire est déconnecté
+                        send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+                    }
+                }
+            }
+        } else if (!player->in_chat_mode) {
+            // C'est le tour de l'adversaire et le joueur n'est pas en mode chat
+            if (opponent == NULL) {
+                // L'adversaire est déconnecté, informer le joueur
+                send(player->socket, "OPPONENT_DISCONNECTED", 21, 0);
+            } else {
+                // Envoyer le message d'attente une seule fois
+                if (player->has_sent_waiting_message == 0) {
+                    if (send(player->socket, "WAITING_FOR_OPPONENT", 20, 0) <= 0) {
+                        // L'envoi a échoué, le joueur courant est déconnecté
+                        printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
+                        pthread_mutex_unlock(&room->room_mutex);
+                        handle_disconnect(player);
+                        pthread_exit(NULL);
+                    } else {
+                        player->has_sent_waiting_message = 1; // Marquer que le message a été envoyé
+                    }
+                }
+
+                // Envoyer un message à l'adversaire pour détecter s'il est toujours connecté
+                if (send(opponent->socket, "KEEP_ALIVE", 10, 0) <= 0) {
+                    // L'envoi a échoué, l'adversaire est déconnecté
+                    printf("Le joueur %s s'est déconnecté.\n", opponent->pseudo);
+                    handle_disconnect(opponent);
+                }
             }
         }
+
+        pthread_mutex_unlock(&room->room_mutex);
+        sleep(1); // Pour éviter le busy waiting
     }
 
-    pthread_mutex_unlock(&room->room_mutex);
-    sleep(1); // Pour éviter le busy waiting
-}
-  sleep(1); // Pour éviter le busy waiting
-    
+    close(player->socket);
+    free(player);
+    pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[]) {

@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
     char *server_ip;
     fd_set read_fds;
     int max_fd;
+    int in_chat_mode = 0; // Indique si le client est en mode chat
 
     // Utiliser l'IP fournie en argument, sinon 127.0.0.1 par défaut
     if (argc > 1) {
@@ -108,6 +109,8 @@ int main(int argc, char *argv[]) {
                 printf("/!\\ La room que vous avez choisie est invalide, choisissez-en une autre /!\\\n");
                 printf("Veuillez sélectionner une room de jeu : ");
                 fflush(stdout);
+            } else if (strcmp(recv_buffer, "KEEP_ALIVE") == 0) {
+                // Ne rien faire, on ignore ce message
             } else if (strcmp(recv_buffer, "ROOM_FULL") == 0) {
                 printf("/!\\ La room que vous avez choisie est déjà complète, choisissez-en une autre /!\\\n");
                 printf("Veuillez sélectionner une room de jeu : ");
@@ -136,8 +139,6 @@ int main(int argc, char *argv[]) {
                 fflush(stdout);
             } else if (strncmp(recv_buffer, "WAITING_FOR_OPPONENT", 20) == 0) {
                 printf("En attente du coup de votre adversaire...\n");
-            } else if (strncmp(recv_buffer, "BOARD_STATE", 11) == 0) {
-                printf("%s", recv_buffer + 11);
             } else if (strcmp(recv_buffer, "INVALID_MOVE") == 0) {
                 printf("Mouvement invalide. Veuillez réessayer.\n");
                 printf("Entrez votre coup : ");
@@ -145,6 +146,20 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(recv_buffer, "GAME_OVER", 9) == 0) {
                 printf("%s\n", recv_buffer + 9);
                 exit(EXIT_SUCCESS);
+            } else if (strcmp(recv_buffer, "ENTER_CHAT_MODE") == 0) {
+                in_chat_mode = 1;
+                system("clear");
+                printf("Vous êtes maintenant en mode chat. Tapez '/game' pour revenir au jeu.\n");
+            } else if (strcmp(recv_buffer, "ENTER_GAME_MODE") == 0) {
+                in_chat_mode = 0;
+                system("clear");
+                printf("Vous êtes maintenant en mode jeu. Tapez '/chat' pour accéder au chat.\n");
+            } else if (strncmp(recv_buffer, "CHAT_HISTORY", 12) == 0) {
+                // Afficher l'historique du chat
+                printf("%s\n", recv_buffer + 13);
+            } else if (strncmp(recv_buffer, "CHAT_UPDATE", 11) == 0) {
+                // Afficher le nouveau message de chat
+                printf("%s\n", recv_buffer + 12);
             } else {
                 printf("%s\n", recv_buffer);
             }
@@ -160,7 +175,17 @@ int main(int argc, char *argv[]) {
                         close(sock);
                         exit(EXIT_SUCCESS);
                     }
-                    send(sock, send_buffer, strlen(send_buffer), 0);
+                    if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0) {
+                        send(sock, send_buffer, strlen(send_buffer), 0);
+                        continue;
+                    }
+                    if (in_chat_mode) {
+                        // Envoyer le message de chat au serveur
+                        send(sock, send_buffer, strlen(send_buffer), 0);
+                    } else {
+                        // Envoyer le message de jeu au serveur
+                        send(sock, send_buffer, strlen(send_buffer), 0);
+                    }
                 }
             }
         }
