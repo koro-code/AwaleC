@@ -114,6 +114,25 @@ void update_score_file(const char *winner_pseudo) {
     }
 }
 
+void send_scoreboard(int client_socket) {
+    FILE *file = fopen("scores.txt", "r");
+    if (!file) {
+        send(client_socket, "SCOREBOARD\nAucun score disponible.\n", 35, 0);
+        return;
+    }
+
+    char buffer[MAX_BUFFER_SIZE];
+    strcpy(buffer, "SCOREBOARD\n");
+
+    char line[MAX_BUFFER_SIZE];
+    while (fgets(line, sizeof(line), file)) {
+        strcat(buffer, line);
+    }
+    fclose(file);
+
+    send(client_socket, buffer, strlen(buffer), 0);
+}
+
 int send_board_state(int socket, Room *room, int player_id) {
     char buffer[MAX_BUFFER_SIZE];
     snprintf(buffer, sizeof(buffer), "CLEAR_SCREEN\nBOARD_STATE\n%s", format_board(room, player_id));
@@ -391,7 +410,7 @@ void *handle_client(void *arg) {
             if (bytes_received > 0) {
                 buffer[bytes_received] = '\0';
 
-                // Vérifier si le joueur souhaite passer en mode chat ou jeu
+                // Vérifier les commandes spéciales
                 if (strcmp(buffer, "/chat") == 0) {
                     player->in_chat_mode = 1;
                     send(player->socket, "ENTER_CHAT_MODE", 15, 0);
@@ -418,6 +437,12 @@ void *handle_client(void *arg) {
 
                     // Envoyer le plateau de jeu au joueur
                     send_board_state(player->socket, room, player->player_id);
+
+                    pthread_mutex_unlock(&room->room_mutex);
+                    continue;
+                } else if (strcmp(buffer, "/score") == 0) {
+                    // Envoyer le tableau des scores au joueur
+                    send_scoreboard(player->socket);
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
@@ -495,7 +520,7 @@ void *handle_client(void *arg) {
                 }
                 buffer[bytes_received] = '\0';
 
-                // Vérifier si le joueur souhaite passer en mode chat
+                // Vérifier les commandes spéciales
                 if (strcmp(buffer, "/chat") == 0) {
                     player->in_chat_mode = 1;
                     send(player->socket, "ENTER_CHAT_MODE", 15, 0);
@@ -508,6 +533,12 @@ void *handle_client(void *arg) {
                         strcat(chat_history_buffer, "\n");
                     }
                     send(player->socket, chat_history_buffer, strlen(chat_history_buffer), 0);
+
+                    pthread_mutex_unlock(&room->room_mutex);
+                    continue;
+                } else if (strcmp(buffer, "/score") == 0) {
+                    // Envoyer le tableau des scores au joueur
+                    send_scoreboard(player->socket);
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;

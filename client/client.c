@@ -89,6 +89,9 @@ int main(int argc, char *argv[]) {
                 printf("%s\n", recv_buffer + 9);
                 printf("Voulez-vous rejouer ? (oui/non): ");
                 fflush(stdout);
+            } else if (strncmp(recv_buffer, "SCOREBOARD", 10) == 0) {
+                printf("Tableau des scores :\n");
+                printf("%s\n", recv_buffer + 11);
             } else if (strncmp(recv_buffer, "ROOM_STATUS", 11) == 0) {
                 // Effacer le terminal
                 system("clear");
@@ -181,7 +184,7 @@ int main(int argc, char *argv[]) {
                         in_chat_mode = 0; // Réinitialiser le mode chat
                         continue;
                     }
-                    if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0) {
+                    if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0 || strcmp(send_buffer, "/score") == 0) {
                         send(sock, send_buffer, strlen(send_buffer), 0);
                         continue;
                     }
