@@ -19,6 +19,7 @@
 #define NUM_ROWS 2
 #define NUM_PITS 6
 
+
 typedef struct {
     int socket;
     char pseudo[MAX_PSEUDO_LENGTH];
@@ -48,6 +49,19 @@ typedef struct DisconnectedPlayer {
     int player_id;
     Room *room;
 } DisconnectedPlayer;
+
+// Structure pour gérer les défis
+typedef struct {
+    char challenger[MAX_PSEUDO_LENGTH]; // Celui qui défie
+    char challenged[MAX_PSEUDO_LENGTH]; // Celui qui est défié
+    int is_active;                      // Si un défi est en cours ou non
+} Challenge;
+
+// Fonction pour envoyer un défi
+void send_challenge(Player *challenger, Player *challenged);
+
+// Fonction pour gérer la réponse à un défi
+void handle_challenge_response(Player *challenged, int accepted);
 
 // Fonctions
 void *handle_client(void *arg);

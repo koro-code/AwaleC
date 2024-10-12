@@ -16,6 +16,93 @@ int num_rooms;
 DisconnectedPlayer disconnected_players[2];
 int num_disconnected = 0;
 
+// Variable globale pour gérer les défis
+Challenge challenge;
+
+void initialize_challenge() {
+    challenge.is_active = 0;
+}
+
+// Fonction pour envoyer un défi à un joueur
+void send_challenge(Player *challenger, Player *challenged) {
+    // Si un défi est déjà en cours, on ne peut pas lancer un nouveau défi
+    if (challenge.is_active) {
+        send(challenger->socket, "Un défi est déjà en cours.\n", 27, 0);
+        return;
+    }
+
+    // Enregistrer le défi
+    strncpy(challenge.challenger, challenger->pseudo, MAX_PSEUDO_LENGTH);
+    strncpy(challenge.challenged, challenged->pseudo, MAX_PSEUDO_LENGTH);
+    challenge.is_active = 1;
+
+    // Envoyer un message au joueur défié
+    char buffer[MAX_BUFFER_SIZE];
+    snprintf(buffer, sizeof(buffer), "Vous avez été défié par %s. Tapez /accepter pour accepter ou /refuser pour refuser.\n", challenger->pseudo);
+    send(challenged->socket, buffer, strlen(buffer), 0);
+
+    // Informer le joueur qui a défié que la demande a été envoyée
+    snprintf(buffer, sizeof(buffer), "Défi envoyé à %s. En attente de sa réponse.\n", challenged->pseudo);
+    send(challenger->socket, buffer, strlen(buffer), 0);
+}
+
+
+// Fonction pour gérer la réponse à un défi
+void handle_challenge_response(Player *challenged, int accepted) {
+    if (!challenge.is_active || strcmp(challenge.challenged, challenged->pseudo) != 0) {
+        send(challenged->socket, "Aucun défi en cours pour vous.\n", 30, 0);
+        return;
+    }
+
+    Player *challenger = NULL;
+
+    // Trouver le joueur qui a lancé le défi
+    for (int i = 0; i < num_rooms; i++) {
+        Room *room = &rooms[i];
+        for (int j = 0; j < MAX_PLAYERS_PER_ROOM; j++) {
+            if (room->players[j] != NULL && strcmp(room->players[j]->pseudo, challenge.challenger) == 0) {
+                challenger = room->players[j];
+                break;
+            }
+        }
+        if (challenger != NULL) break;
+    }
+
+    if (challenger == NULL) {
+        send(challenged->socket, "Le joueur qui vous a défié n'est plus connecté.\n", 47, 0);
+        challenge.is_active = 0;
+        return;
+    }
+
+    char buffer[MAX_BUFFER_SIZE];
+
+    if (accepted) {
+        snprintf(buffer, sizeof(buffer), "%s a accepté votre défi !\n", challenged->pseudo);
+        send(challenger->socket, buffer, strlen(buffer), 0);
+        send(challenged->socket, "Vous avez accepté le défi !\n", 29, 0);
+
+        // Placer les deux joueurs dans la même room et lancer une partie
+        pthread_mutex_lock(&rooms[0].room_mutex);  // Supposons qu'on les place dans la room 0 pour cet exemple
+        challenger->room_id = 0;
+        challenged->room_id = 0;
+        rooms[0].players[0] = challenger;
+        rooms[0].players[1] = challenged;
+        rooms[0].players_connected = 2;
+        pthread_mutex_unlock(&rooms[0].room_mutex);
+
+        send(challenger->socket, "Vous êtes maintenant dans une partie.\n", 38, 0);
+        send(challenged->socket, "Vous êtes maintenant dans une partie.\n", 38, 0);
+
+    } else {
+        snprintf(buffer, sizeof(buffer), "%s a refusé votre défi.\n", challenged->pseudo);
+        send(challenger->socket, buffer, strlen(buffer), 0);
+        send(challenged->socket, "Vous avez refusé le défi.\n", 27, 0);
+    }
+
+    // Réinitialiser le défi
+    challenge.is_active = 0;
+}
+
 void initialize_rooms(int num_rooms) {
     for (int i = 0; i < num_rooms; i++) {
         rooms[i].players_connected = 0;
@@ -272,6 +359,30 @@ void handle_disconnect(Player *player) {
     free(player);
 }
 
+void add_player_to_global_list(Player *player) {
+    pthread_mutex_lock(&global_player_list_mutex); // Protéger l'accès à la liste
+    if (global_player_list.connected_count < MAX_CONNECTED_PLAYERS) {
+        global_player_list.connected_players[global_player_list.connected_count++] = player;
+    }
+    pthread_mutex_unlock(&global_player_list_mutex);
+}
+
+void remove_player_from_global_list(Player *player) {
+    pthread_mutex_lock(&global_player_list_mutex);
+    for (int i = 0; i < global_player_list.connected_count; i++) {
+        if (global_player_list.connected_players[i] == player) {
+            // Retirer le joueur
+            for (int j = i; j < global_player_list.connected_count - 1; j++) {
+                global_player_list.connected_players[j] = global_player_list.connected_players[j + 1];
+            }
+            global_player_list.connected_players[global_player_list.connected_count - 1] = NULL;
+            global_player_list.connected_count--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&global_player_list_mutex);
+}
+
 void *handle_client(void *arg) {
     Player *player = (Player *)arg;
     char buffer[MAX_BUFFER_SIZE];
@@ -287,6 +398,7 @@ void *handle_client(void *arg) {
     }
     player->pseudo[bytes_received] = '\0';
     player->in_chat_mode = 0; // Initialiser le mode chat du joueur
+    add_player_to_global_list(player);
 
     while (1) { // Boucle principale pour permettre au joueur de rejouer
         int reconnected = 0;
@@ -314,24 +426,64 @@ void *handle_client(void *arg) {
                 if (opponent != NULL) {
                     send(opponent->socket, "OPPONENT_RECONNECTED", 20, 0);
                 }
+                add_player_to_global_list(player);
 
                 reconnected = 1;
                 break;
             }
         }
 
-        if (!reconnected) {
-            while (1) {
-                // Envoyer l'état des rooms
-                snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
-                for (int i = 0; i < num_rooms; i++) {
-                    char room_info[50];
-                    snprintf(room_info, sizeof(room_info), "Room %d: %d joueur(s) connecté(s)\n", i, rooms[i].players_connected);
-                    strcat(buffer, room_info);
-                }
-                send(player->socket, buffer, strlen(buffer), 0);
+    if (!reconnected) {
+        while (1) {
 
-                // Recevoir la sélection de la room
+            // Envoyer l'état des rooms
+            snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
+            for (int i = 0; i < num_rooms; i++) {
+                char room_info[50];
+                snprintf(room_info, sizeof(room_info), "Room %d: %d joueur(s) connecté(s)\n", i, rooms[i].players_connected);
+                strcat(buffer, room_info);
+            }
+            send(player->socket, buffer, strlen(buffer), 0);
+
+            // Recevoir la sélection de la room ou une commande
+            bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+            if (bytes_received <= 0) {
+                close(player->socket);
+                free(player);
+                pthread_exit(NULL);
+            }
+
+            buffer[bytes_received] = '\0';
+
+            // Gérer la commande /defi
+            if (strncmp(buffer, "/defi", 5) == 0) {
+
+                // Étape 1: Afficher la liste des joueurs connectés
+                char players_list[MAX_BUFFER_SIZE] = "Liste des joueurs connectés :\n";
+                int players_found = 0;
+
+                // Parcourir toutes les rooms et joueurs
+                for (int i = 0; i < num_rooms; i++) {
+                    for (int j = 0; j < MAX_PLAYERS_PER_ROOM; j++) {
+                        if (rooms[i].players[j] != NULL) {
+                            strcat(players_list, rooms[i].players[j]->pseudo);
+                            strcat(players_list, "\n");
+                            players_found++;
+                        }
+                    }
+                }
+
+                // S'il n'y a pas de joueurs à défier
+                if (players_found == 0) {
+                    send(player->socket, "Aucun autre joueur n'est connecté.\n", 36, 0);
+                    continue;  // Retourner à la sélection de room
+                }
+
+                // Envoyer la liste des joueurs connectés
+                send(player->socket, players_list, strlen(players_list), 0);
+
+                // Étape 2: Demander au joueur de saisir le pseudo à défier
+                send(player->socket, "Entrez le pseudo du joueur à défier : ", 39, 0);
                 bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
                 if (bytes_received <= 0) {
                     close(player->socket);
@@ -339,6 +491,59 @@ void *handle_client(void *arg) {
                     pthread_exit(NULL);
                 }
                 buffer[bytes_received] = '\0';
+
+                // Récupérer le pseudo du joueur défié
+                char challenged_pseudo[MAX_PSEUDO_LENGTH];
+                sscanf(buffer, "%s", challenged_pseudo);
+
+                // Étape 3: Vérifier si le joueur entré existe
+                Player *challenged_player = NULL;
+                for (int i = 0; i < num_rooms; i++) {
+                    for (int j = 0; j < MAX_PLAYERS_PER_ROOM; j++) {
+                        if (rooms[i].players[j] != NULL && strcmp(rooms[i].players[j]->pseudo, challenged_pseudo) == 0) {
+                            challenged_player = rooms[i].players[j];
+                            break;
+                        }
+                    }
+                    if (challenged_player != NULL) break;
+                }
+
+                // Si le joueur n'existe pas ou n'est pas connecté
+                if (challenged_player == NULL) {
+                    send(player->socket, "Joueur introuvable ou non connecté.\n", 36, 0);
+                    continue;  // Retourner à la sélection de room
+                }
+
+                // Étape 4: Envoyer le défi au joueur sélectionné
+                send_challenge(player, challenged_player);  // Envoyer le défi
+
+                // Attendre la réponse au défi avant de poursuivre
+                while (1) {
+                    bytes_received = recv(player->socket, buffer, MAX_BUFFER_SIZE, 0);
+                    if (bytes_received <= 0) {
+                        close(player->socket);
+                        free(player);
+                        pthread_exit(NULL);
+                    }
+                    buffer[bytes_received] = '\0';
+
+                    // Gérer la réponse au défi
+                    if (strcmp(buffer, "/accepter") == 0) {
+                        handle_challenge_response(player, 1);  // Accepter le défi
+                        break;  // Quitter la boucle et commencer une partie
+                    } else if (strcmp(buffer, "/refuser") == 0) {
+                        handle_challenge_response(player, 0);  // Refuser le défi
+                        continue;  // Retourner à la sélection de room
+                    } else {
+                        send(player->socket, "Attente de la réponse au défi...\n", 33, 0);
+                    }
+                }
+            } else if (strcmp(buffer, "/accepter") == 0) {
+                handle_challenge_response(player, 1);  // Accepter le défi
+            } else if (strcmp(buffer, "/refuser") == 0) {
+                handle_challenge_response(player, 0);  // Refuser le défi
+            }
+                // Gestion normale de la sélection de room
                 int selected_room = atoi(buffer);
                 if (selected_room < 0 || selected_room >= num_rooms) {
                     send(player->socket, "INVALID_ROOM", 12, 0);
@@ -373,8 +578,10 @@ void *handle_client(void *arg) {
 
                 send(player->socket, "JOINED_ROOM", 11, 0);
                 break;
-            }
         }
+    }
+
+
 
         // Attendre que les deux joueurs soient connectés
         while (rooms[player->room_id].players_connected < MAX_PLAYERS_PER_ROOM) {
@@ -479,6 +686,7 @@ void *handle_client(void *arg) {
                 printf("Le joueur %s s'est déconnecté.\n", player->pseudo);
                 pthread_mutex_unlock(&room->room_mutex);
                 handle_disconnect(player);
+                remove_player_from_global_list(player);
                 pthread_exit(NULL);
             } else {
                 // Gérer les erreurs de recv()
@@ -674,6 +882,9 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in server_addr, client_addr;
     pthread_t thread_id;
     signal(SIGPIPE, SIG_IGN);
+    // Initialiser la liste des joueurs connectés
+    PlayerList global_player_list = { .connected_count = 0 };
+
 
     if (argc != 2) {
         printf("Usage: %s <nombre_de_rooms>\n", argv[0]);
