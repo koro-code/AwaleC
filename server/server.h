@@ -18,6 +18,10 @@
 
 #define NUM_ROWS 2
 #define NUM_PITS 6
+// Définir le nombre maximum de joueurs connectés
+#define MAX_CONNECTED_PLAYERS 100
+
+
 
 
 typedef struct {
@@ -41,6 +45,15 @@ typedef struct {
     char chat_history[CHAT_HISTORY_SIZE][MAX_MESSAGE_LENGTH];
     int chat_history_count;
 } Room;
+
+// Structure pour stocker les joueurs connectés
+typedef struct {
+    Player *players[MAX_CONNECTED_PLAYERS];
+    int count;
+} ConnectedPlayers;
+
+extern ConnectedPlayers connected_players;
+
 
 // Structure pour stocker les joueurs déconnectés
 typedef struct DisconnectedPlayer {
