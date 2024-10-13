@@ -9,12 +9,22 @@
 #include <errno.h>
 #include <pthread.h>
 
+Player *waiting_players[MAX_ROOMS];
+int num_waiting_players = 0;
+
 Room rooms[MAX_ROOMS];
 int num_rooms;
 
 // Structure pour stocker les joueurs déconnectés
 DisconnectedPlayer disconnected_players[2];
 int num_disconnected = 0;
+
+void handle_challenge(Player *challenger, Player *challenged) {
+    char buffer[MAX_BUFFER_SIZE];
+    snprintf(buffer, sizeof(buffer), "CHALLENGE_RECEIVED\n%s vous a défié. Acceptez-vous ? (oui/non): ", challenger->pseudo);
+    send(challenged->socket, buffer, strlen(buffer), 0);
+}
+
 
 void initialize_rooms(int num_rooms) {
     for (int i = 0; i < num_rooms; i++) {
@@ -446,6 +456,25 @@ void *handle_client(void *arg) {
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
+                } else if (strcmp(buffer, "/challenge") == 0) {
+                    pthread_mutex_lock(&room->room_mutex);
+
+                    if (num_waiting_players == 0) {
+                        // Aucun joueur en attente, ajouter le joueur courant à la liste d'attente
+                        waiting_players[num_waiting_players++] = player;
+                        send(player->socket, "Vous êtes en attente d'un adversaire pour un challenge.\n", 52, 0);
+                    } else {
+                        // Un joueur est en attente, le défier
+                        Player *challenged = waiting_players[--num_waiting_players];
+                        player->is_being_challenged = 1;
+                        challenged->challenger = player;
+
+                        // Envoyer la demande de défi au joueur `challenged`
+                        handle_challenge(player, challenged);
+                    }
+
+                    pthread_mutex_unlock(&room->room_mutex);
+                    continue;
                 }
 
                 if (player->in_chat_mode) {
@@ -660,6 +689,49 @@ void *handle_client(void *arg) {
             player->in_chat_mode = 0;
             player->has_sent_waiting_message = 0;
             continue; // Retourner à la sélection de la room
+        } else if (strcasecmp(buffer, "oui") == 0 && player->is_being_challenged) {
+            // Le joueur `challenged` accepte le défi
+            player->is_being_challenged = 0;
+            Player *challenger = player->challenger;
+
+            // Chercher une room vide
+            int room_found = 0;
+            for (int i = 0; i < num_rooms; i++) {
+                if (rooms[i].players_connected == 0) {
+                    pthread_mutex_lock(&rooms[i].room_mutex);
+
+                    // Ajouter les deux joueurs à la room
+                    player->room_id = i;
+                    player->player_id = 0;
+                    rooms[i].players[0] = player;
+                    rooms[i].players_connected++;
+
+                    challenger->room_id = i;
+                    challenger->player_id = 1;
+                    rooms[i].players[1] = challenger;
+                    rooms[i].players_connected++;
+
+                    room_found = 1;
+                    pthread_mutex_unlock(&rooms[i].room_mutex);
+                    break;
+                }
+            }
+
+            if (room_found) {
+                send(player->socket, "Challenge accepté ! Vous avez rejoint une room pour jouer.\n", 58, 0);
+                send(challenger->socket, "Votre challenge a été accepté ! Vous avez rejoint une room pour jouer.\n", 67, 0);
+            } else {
+                send(player->socket, "Aucune room disponible. Vous revenez à la recherche de room.\n", 62, 0);
+                send(challenger->socket, "Aucune room disponible. Vous revenez à la recherche de room.\n", 62, 0);
+            }
+        } else if (strcasecmp(buffer, "non") == 0 && player->is_being_challenged) {
+            // Le joueur `challenged` refuse le défi
+            player->is_being_challenged = 0;
+            Player *challenger = player->challenger;
+
+            // Envoyer un message au challenger
+            send(challenger->socket, "Votre challenge a été refusé. Vous revenez à l'état initial.\n", 58, 0);
+            send(player->socket, "Vous avez refusé le challenge. Retour à l'état initial.\n", 55, 0);
         } else {
             // Le joueur veut quitter
             close(player->socket);

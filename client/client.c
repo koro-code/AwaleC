@@ -22,6 +22,8 @@ int main(int argc, char *argv[]) {
     fd_set read_fds;
     int max_fd;
     int in_chat_mode = 0; // Indique si le client est en mode chat
+    int is_challenged = 0; // Flag pour savoir si le joueur est défié
+
 
     // Utiliser l'IP fournie en argument, sinon 127.0.0.1 par défaut
     if (argc > 1) {
@@ -164,6 +166,10 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(recv_buffer, "CHAT_UPDATE", 11) == 0) {
                 // Afficher le nouveau message de chat
                 printf("%s\n", recv_buffer + 12);
+            }else if (strncmp(recv_buffer, "CHALLENGE_RECEIVED", 17) == 0) {
+                printf("%s\n", recv_buffer + 18);
+                fflush(stdout);
+                is_challenged = 1; // Activer le flag
             } else {
                 printf("%s\n", recv_buffer);
             }
@@ -174,17 +180,30 @@ int main(int argc, char *argv[]) {
             if (fgets(send_buffer, MAX_BUFFER_SIZE, stdin) != NULL) {
                 send_buffer[strcspn(send_buffer, "\n")] = '\0';
                 if (strlen(send_buffer) > 0) {
-                    if (strcmp(send_buffer, "exit") == 0 || strcmp(send_buffer, "disconnect") == 0 || strcmp(send_buffer, "non") == 0) {
+                    if (strcmp(send_buffer, "exit") == 0 || strcmp(send_buffer, "disconnect") == 0) {
                         printf("Déconnexion...\n");
                         close(sock);
                         exit(EXIT_SUCCESS);
-                    } else if (strcmp(send_buffer, "oui") == 0) {
-                        // Envoyer la réponse au serveur
+                    } // Gestion de la réponse
+                     if (strcmp(send_buffer, "oui") == 0 || strcmp(send_buffer, "non") == 0) {
+                            if (is_challenged) {
+                                // Envoyer la réponse au serveur
+                                send(sock, send_buffer, strlen(send_buffer), 0);
+                                is_challenged = 0; // Réinitialiser le flag après avoir répondu
+                                continue;
+                            } else {
+                                // Si ce n'était pas une réponse de défi, interpréter comme déconnexion
+                                printf("Déconnexion...\n");
+                                close(sock);
+                                exit(EXIT_SUCCESS);
+                            }
+                        }
+                    
+                    if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0 || strcmp(send_buffer, "/score") == 0) {
                         send(sock, send_buffer, strlen(send_buffer), 0);
-                        in_chat_mode = 0; // Réinitialiser le mode chat
                         continue;
                     }
-                    if (strcmp(send_buffer, "/chat") == 0 || strcmp(send_buffer, "/game") == 0 || strcmp(send_buffer, "/score") == 0) {
+                    if (strcmp(send_buffer, "/challenge") == 0) {
                         send(sock, send_buffer, strlen(send_buffer), 0);
                         continue;
                     }

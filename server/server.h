@@ -18,6 +18,8 @@
 
 #define NUM_ROWS 2
 #define NUM_PITS 6
+#define MAX_WAITING_PLAYERS MAX_ROOMS
+
 
 typedef struct {
     int socket;
@@ -26,7 +28,10 @@ typedef struct {
     int player_id;
     int in_chat_mode; // Indicateur de mode chat pour chaque joueur
     int has_sent_waiting_message; // Indicateur pour le message d'attente
+    int is_being_challenged;
+    struct Player *challenger; // Utilisation correcte de 'struct Player *'
 } Player;
+
 
 
 typedef struct {
@@ -60,5 +65,10 @@ int is_game_over(Room *room);
 int determine_winner(Room *room);
 void send_to_both_players(Room *room, const char *message);
 void handle_disconnect(Player *player);
+void handle_challenge(Player *challenger, Player *challenged);
 
+
+
+extern Player *waiting_players[MAX_WAITING_PLAYERS];
+extern int num_waiting_players;
 #endif // SERVER_H
