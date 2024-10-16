@@ -1,5 +1,7 @@
 # Awalé - Jeu en Réseau
 
+# Jeu de LEONARDO HERON et NOE BAIOCCHI
+
 Bienvenue dans Awalé, un jeu de société traditionnel africain maintenant disponible en version client-serveur ! Ce projet permet de jouer à distance via un serveur, avec des fonctionnalités comme la gestion des défis, des scores et un mode de discussion en temps réel.
 
 ## Configuration du Serveur
