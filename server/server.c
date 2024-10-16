@@ -25,6 +25,18 @@ void initialize_challenge() {
     challenge.is_active = 0;
 }
 
+void send_connected_players_list(int client_socket) {
+    char buffer[MAX_BUFFER_SIZE] = "Liste des joueurs connectés :\n";
+    for (int i = 0; i < connected_players.count; i++) {
+        if (connected_players.players[i] != NULL) {
+            strcat(buffer, connected_players.players[i]->pseudo);
+            strcat(buffer, "\n");
+        }
+    }
+    send(client_socket, buffer, strlen(buffer), 0);
+}
+
+
 // Fonction pour envoyer un défi à un joueur
 void send_challenge(Player *challenger, Player *challenged) {
     // Si un défi est déjà en cours, on ne peut pas lancer un nouveau défi
@@ -120,7 +132,6 @@ void handle_challenge_response(Player *challenged, int accepted) {
         send(challenged->socket, "Vous êtes maintenant dans la room 0.\n", 38, 0);
     
         // Lancer la boucle de jeu pour cette partie
-        start_game(rooms[0]);  // On suppose que vous avez une fonction pour lancer le jeu dans une room
     } else {
         // Si le défi est refusé, informer les joueurs
         snprintf(buffer, sizeof(buffer), "%s a refusé votre défi.\n", challenged->pseudo);
@@ -543,6 +554,20 @@ void *handle_client(void *arg) {
                 handle_challenge_response(player, 1);  // Accepter le défi
             } else if (strcmp(buffer, "/refuser") == 0) {
                 handle_challenge_response(player, 0);  // Refuser le défi
+            } else if (strcmp(buffer, "/liste") == 0) {
+                send_connected_players_list(player->socket);
+
+                // Attendre 5 secondes avant de réafficher le lobby
+                sleep(5);
+
+                // Réafficher l'état du lobby après le délai
+                snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
+                for (int i = 0; i < num_rooms; i++) {
+                    char room_info[50];
+                    snprintf(room_info, sizeof(room_info), "Room %d: %d joueur(s) connecté(s)\n", i, rooms[i].players_connected);
+                    strcat(buffer, room_info);
+                }
+                send(player->socket, buffer, strlen(buffer), 0);
             } else {
                 // Gestion normale de la sélection de room
                 int selected_room = atoi(buffer);
@@ -655,7 +680,23 @@ void *handle_client(void *arg) {
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
+                } else if (strcmp(buffer, "/liste") == 0) {
+                    send_connected_players_list(player->socket);
+
+                    // Attendre 5 secondes avant de réafficher le lobby
+                    sleep(5);
+
+                    // Réafficher l'état du lobby après le délai
+                    snprintf(buffer, sizeof(buffer), "ROOM_STATUS\n");
+                    for (int i = 0; i < num_rooms; i++) {
+                        char room_info[50];
+                        snprintf(room_info, sizeof(room_info), "Room %d: %d joueur(s) connecté(s)\n", i, rooms[i].players_connected);
+                        strcat(buffer, room_info);
+                    }
+                    send(player->socket, buffer, strlen(buffer), 0);
                 }
+
+
 
                 if (player->in_chat_mode) {
                     // Traiter le message de chat

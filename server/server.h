@@ -88,4 +88,7 @@ int determine_winner(Room *room);
 void send_to_both_players(Room *room, const char *message);
 void handle_disconnect(Player *player);
 
+void send_connected_players_list(int client_socket);
+
+
 #endif // SERVER_H
