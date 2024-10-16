@@ -678,6 +678,8 @@ void *handle_client(void *arg) {
                     // Envoyer le tableau des scores au joueur
                     send_scoreboard(player->socket);
 
+                    sleep(5);
+
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
                 } else if (strcmp(buffer, "/liste") == 0) {
@@ -789,6 +791,8 @@ void *handle_client(void *arg) {
                 } else if (strcmp(buffer, "/score") == 0) {
                     // Envoyer le tableau des scores au joueur
                     send_scoreboard(player->socket);
+
+                    sleep(5);
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
