@@ -14,7 +14,7 @@ Le serveur Awalé est actuellement disponible à l'IP suivante :
 Pour vous connecter, utilisez le client fourni avec le projet et exécutez la commande suivante :
 
 ```bash
-./client 209.38.181.89
+./awale_client 209.38.181.89
 ```
 
 - Après avoir entré votre pseudonyme, vous pourrez choisir une room où jouer. Si vous souhaitez défier un autre joueur, utilisez la commande `/defi <pseudo_du_joueur>`.
@@ -38,7 +38,7 @@ make
 4. Démarrez le serveur avec un nombre de rooms spécifié. Par exemple, pour 5 rooms :
 
 ```bash
-./server 5
+./awale_server 5
 ```
 
 Cela démarre le serveur sur le port **12345**.
@@ -48,7 +48,7 @@ Cela démarre le serveur sur le port **12345**.
 Une fois que le serveur est lancé, les joueurs peuvent se connecter en utilisant l'adresse IP de votre serveur. Par exemple, si l'IP du serveur est `192.168.1.100`, le client peut se connecter avec la commande suivante :
 
 ```bash
-./client 192.168.1.100
+./awale_client 192.168.1.100
 ```
 
 Si rien n'est spécifié, alors l'ip localhost sera automatiquement utilisée.
