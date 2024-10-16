@@ -31,7 +31,9 @@ typedef struct {
     int player_id;
     int in_chat_mode; // Indicateur de mode chat pour chaque joueur
     int has_sent_waiting_message; // Indicateur pour le message d'attente
+    int challenge_accepted; // Nouveau flag pour savoir si le joueur a accepté un défi
 } Player;
+
 
 
 typedef struct {
@@ -87,5 +89,6 @@ int is_game_over(Room *room);
 int determine_winner(Room *room);
 void send_to_both_players(Room *room, const char *message);
 void handle_disconnect(Player *player);
+void send_connected_players_list(int client_socket);
 
 #endif // SERVER_H
