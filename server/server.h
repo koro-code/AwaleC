@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <signal.h>
+#include <errno.h>
 
 #define MAX_ROOMS 10
 #define MAX_PLAYERS_PER_ROOM 2
@@ -21,7 +23,13 @@
 // Définir le nombre maximum de joueurs connectés
 #define MAX_CONNECTED_PLAYERS 100
 
+#define MAX_PLAYERS 100
+#define MAX_PASSWORD_LENGTH 50
 
+typedef struct {
+    char pseudo[MAX_PSEUDO_LENGTH];
+    char password[MAX_PASSWORD_LENGTH];
+} PlayerAccount;
 
 
 typedef struct {

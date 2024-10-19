@@ -1,13 +1,9 @@
 // server.c
 
 #include "server.h"
-#include <signal.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <pthread.h>
+
+PlayerAccount player_accounts[MAX_PLAYERS];
+int num_accounts = 0;
 
 Room rooms[MAX_ROOMS];
 int num_rooms;
@@ -35,6 +31,26 @@ void send_connected_players_list(int client_socket) {
     }
     send(client_socket, buffer, strlen(buffer), 0);
 }
+
+int find_player_by_pseudo(const char *pseudo) {
+    for (int i = 0; i < num_accounts; i++) {
+        if (strcmp(player_accounts[i].pseudo, pseudo) == 0) {
+            return i; // Renvoie l'indice du joueur
+        }
+    }
+    return -1; // Le joueur n'existe pas
+}
+
+int create_new_player(const char *pseudo, const char *password) {
+    if (num_accounts >= MAX_PLAYERS) {
+        return -1; // Limite des comptes atteinte
+    }
+    strncpy(player_accounts[num_accounts].pseudo, pseudo, MAX_PSEUDO_LENGTH);
+    strncpy(player_accounts[num_accounts].password, password, MAX_PASSWORD_LENGTH);
+    num_accounts++;
+    return 0; // Compte créé avec succès
+}
+
 
 
 // Fonction pour envoyer un défi à un joueur
@@ -415,6 +431,41 @@ void *handle_client(void *arg) {
     }
     player->pseudo[bytes_received] = '\0';
     player->in_chat_mode = 0; // Initialiser le mode chat du joueur
+
+    // Vérifier si le pseudo est déjà pris
+    int player_index = find_player_by_pseudo(player->pseudo);
+    if (player_index >= 0) {
+        // Le pseudo existe, demander le mot de passe
+        send(player->socket, "Entrez votre mot de passe : ", 28, 0);
+        char password[MAX_PASSWORD_LENGTH];
+        bytes_received = recv(player->socket, password, MAX_PASSWORD_LENGTH, 0);
+        password[bytes_received] = '\0';
+
+        // Vérifier le mot de passe
+        if (strcmp(player_accounts[player_index].password, password) == 0) {
+            send(player->socket, "Connexion réussie.\n", 19, 0);
+        } else {
+            send(player->socket, "Mot de passe incorrect.\n", 24, 0);
+            close(player->socket);
+            free(player);
+            pthread_exit(NULL);
+        }
+    } else {
+        // Le pseudo n'existe pas, créer un nouveau compte
+        send(player->socket, "Pseudo non trouvé. Créez un mot de passe : ", 42, 0);
+        char password[MAX_PASSWORD_LENGTH];
+        bytes_received = recv(player->socket, password, MAX_PASSWORD_LENGTH, 0);
+        password[bytes_received] = '\0';
+
+        if (create_new_player(player->pseudo, password) == 0) {
+            send(player->socket, "Compte créé et connecté.\n", 25, 0);
+        } else {
+            send(player->socket, "Erreur lors de la création du compte.\n", 38, 0);
+            close(player->socket);
+            free(player);
+            pthread_exit(NULL);
+        }
+    }
 
     while (1) { // Boucle principale pour permettre au joueur de rejouer
         int reconnected = 0;
