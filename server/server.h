@@ -25,10 +25,13 @@
 
 #define MAX_PLAYERS 100
 #define MAX_PASSWORD_LENGTH 50
+#define MAX_BIO_LENGTH 256
+
 
 typedef struct {
     char pseudo[MAX_PSEUDO_LENGTH];
     char password[MAX_PASSWORD_LENGTH];
+    char bio[MAX_BIO_LENGTH];
 } PlayerAccount;
 
 

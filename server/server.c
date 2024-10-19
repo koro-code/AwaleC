@@ -41,12 +41,13 @@ int find_player_by_pseudo(const char *pseudo) {
     return -1; // Le joueur n'existe pas
 }
 
-int create_new_player(const char *pseudo, const char *password) {
+int create_new_player(const char *pseudo, const char *password, const char *bio) {
     if (num_accounts >= MAX_PLAYERS) {
         return -1; // Limite des comptes atteinte
     }
     strncpy(player_accounts[num_accounts].pseudo, pseudo, MAX_PSEUDO_LENGTH);
     strncpy(player_accounts[num_accounts].password, password, MAX_PASSWORD_LENGTH);
+    strncpy(player_accounts[num_accounts].bio, bio, MAX_BIO_LENGTH);
     num_accounts++;
     return 0; // Compte créé avec succès
 }
@@ -457,7 +458,12 @@ void *handle_client(void *arg) {
         bytes_received = recv(player->socket, password, MAX_PASSWORD_LENGTH, 0);
         password[bytes_received] = '\0';
 
-        if (create_new_player(player->pseudo, password) == 0) {
+        send(player->socket, "Entrez une courte biographie : ", 31, 0);
+        char bio[MAX_BIO_LENGTH];
+        bytes_received = recv(player->socket, bio, MAX_BIO_LENGTH, 0);
+        bio[bytes_received] = '\0';
+
+        if (create_new_player(player->pseudo, password, bio) == 0) {
             send(player->socket, "Compte créé et connecté.\n", 25, 0);
         } else {
             send(player->socket, "Erreur lors de la création du compte.\n", 38, 0);
@@ -605,6 +611,30 @@ void *handle_client(void *arg) {
                 handle_challenge_response(player, 1);  // Accepter le défi
             } else if (strcmp(buffer, "/refuser") == 0) {
                 handle_challenge_response(player, 0);  // Refuser le défi
+            } else if (strncmp(buffer, "/bio", 4) == 0) {
+                // Demander le pseudo du joueur pour lequel on veut voir la biographie
+                send(player->socket, "Entrez le pseudonyme du joueur : ", 33, 0);
+                
+                // Recevoir le pseudo du joueur demandé
+                bytes_received = recv(player->socket, buffer, MAX_PSEUDO_LENGTH, 0);
+                if (bytes_received <= 0) {
+                    close(player->socket);
+                    free(player);
+                    pthread_exit(NULL);
+                }
+                buffer[bytes_received] = '\0';
+
+                // Rechercher le joueur par pseudo
+                int player_index = find_player_by_pseudo(buffer);
+                if (player_index >= 0) {
+                    // Envoyer la biographie du joueur
+                    char bio_message[MAX_BUFFER_SIZE];
+                    snprintf(bio_message, sizeof(bio_message), "Biographie de %s : %s\n", player_accounts[player_index].pseudo, player_accounts[player_index].bio);
+                    send(player->socket, bio_message, strlen(bio_message), 0);
+                } else {
+                    // Si le joueur n'existe pas
+                    send(player->socket, "Joueur introuvable ou sans biographie.\n", 39, 0);
+                }
             } else if (strcmp(buffer, "/liste") == 0) {
                 send_connected_players_list(player->socket);
 
@@ -733,6 +763,30 @@ void *handle_client(void *arg) {
 
                     pthread_mutex_unlock(&room->room_mutex);
                     continue;
+                } else if (strncmp(buffer, "/bio", 4) == 0) {
+                    // Demander le pseudo du joueur pour lequel on veut voir la biographie
+                    send(player->socket, "Entrez le pseudonyme du joueur : ", 33, 0);
+                    
+                    // Recevoir le pseudo du joueur demandé
+                    bytes_received = recv(player->socket, buffer, MAX_PSEUDO_LENGTH, 0);
+                    if (bytes_received <= 0) {
+                        close(player->socket);
+                        free(player);
+                        pthread_exit(NULL);
+                    }
+                    buffer[bytes_received] = '\0';
+
+                    // Rechercher le joueur par pseudo
+                    int player_index = find_player_by_pseudo(buffer);
+                    if (player_index >= 0) {
+                        // Envoyer la biographie du joueur
+                        char bio_message[MAX_BUFFER_SIZE];
+                        snprintf(bio_message, sizeof(bio_message), "Biographie de %s : %s\n", player_accounts[player_index].pseudo, player_accounts[player_index].bio);
+                        send(player->socket, bio_message, strlen(bio_message), 0);
+                    } else {
+                        // Si le joueur n'existe pas
+                        send(player->socket, "Joueur introuvable ou sans biographie.\n", 39, 0);
+                    }
                 } else if (strcmp(buffer, "/liste") == 0) {
                     send_connected_players_list(player->socket);
 
