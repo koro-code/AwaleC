@@ -42,7 +42,9 @@ typedef struct {
     int player_id;
     int in_chat_mode; // Indicateur de mode chat pour chaque joueur
     int has_sent_waiting_message; // Indicateur pour le message d'attente
+    int challenge_accepted; // Nouveau flag pour savoir si le joueur a accepté un défi
 } Player;
+
 
 
 typedef struct {
@@ -85,9 +87,7 @@ typedef struct {
 void send_challenge(Player *challenger, Player *challenged);
 
 // Fonction pour gérer la réponse à un défi
-void handle_challenge_response(Player *challenged, int accepted);
-
-// Fonctions
+void handle_challenge_response(Player *challenger, Player *challenged, int accepted);
 void *handle_client(void *arg);
 void initialize_rooms(int num_rooms);
 void update_score_file(const char *winner_pseudo);
@@ -98,8 +98,16 @@ int is_game_over(Room *room);
 int determine_winner(Room *room);
 void send_to_both_players(Room *room, const char *message);
 void handle_disconnect(Player *player);
-
 void send_connected_players_list(int client_socket);
+void game_loop(Player *player, Player *opponent, Room *room);
+void send_chat_history(Room *room, Player *player);
+void handle_player_move(Room *room, Player *player, char *buffer);
+void handle_game_over(Room *room, Player *player, Player *opponent);
+void update_turn(Room *room, Player *opponent);
+void handle_waiting_opponent(Player *player, Player *opponent);
+void ask_for_rematch(Player *player);
+void handle_disconnect_on_error(Player *player, int bytes_received);
+
 
 
 #endif // SERVER_H
