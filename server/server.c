@@ -1027,7 +1027,7 @@ void *handle_client(void *arg) {
         // NOE : c'est ici que le defieur att en attendant qu'une actoin u difier soit faite pour debloquer la situ
         // Attendre que les deux joueurs soient connectés
         while (rooms[player->room_id].players_connected < MAX_PLAYERS_PER_ROOM) {
-            send(player->socket, "Joueur introuvable ou bit* connecté.\n", 36, 0);
+            send(player->socket, "En attente de l'adversaire pour la connexion à la partie.\n", 55, 0);
             sleep(1);
         }
 
