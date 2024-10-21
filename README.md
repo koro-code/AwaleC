@@ -23,61 +23,59 @@ Pour vous connecter, utilisez le client fourni avec le projet et exécutez la co
 
 ### Option 2: Héberger votre propre serveur
 
-Si vous préférez héberger votre propre serveur, voici comment procéder :
 
-#### Étapes pour héberger le serveur :
+## Branches du Projet
 
-1. Clonez ce dépôt sur votre machine.
-   
-2. Assurez-vous que votre environnement supporte les bibliothèques standards nécessaires (POSIX Threads, Sockets).
-
-3. Compilez les fichiers serveur avec la commande suivante (le `Makefile` est inclus) :
-
+### 1. **Branche `main`**
+La branche `main` contient les fichiers de base pour utiliser et tester le jeu Awalé. Pour utiliser cette branche :
+- Compilez les fichiers avec la commande suivante :  
+  ```bash
+  gcc server.c -o server -lpthread
+  gcc client.c -o client
+  ```
+Lancez le serveur en spécifiant le nombre de rooms :
 ```bash
-make
+./server <nombre_de_rooms>
 ```
 
-4. Démarrez le serveur avec un nombre de rooms spécifié. Par exemple, pour 5 rooms :
-
+Lancez ensuite un client en précisant l'adresse IP du serveur (par défaut, il est configuré pour 127.0.0.1) :
 ```bash
-./awale_server 5
+./client <adresse_ip_du_serveur>
 ```
+Dans cette version, les fonctionnalités de base du jeu fonctionnent correctement, incluant la gestion des parties, des scores, et des connexions/déconnexions des joueurs.
 
-Cela démarre le serveur sur le port **12345**.
+### 2. Branche defi
+La branche defi ajoute une fonctionnalité supplémentaire permettant de lancer des défis entre joueurs connectés. Cette fonctionnalité est activée via la commande `/defi` côté client. Voici comment elle fonctionne :
 
-#### Étapes pour se connecter à votre serveur :
+Un joueur peut lancer un défi en entrant la commande `/defi` suivie du pseudo du joueur à défier.
+Le joueur défié peut répondre avec `/accepter` ou `/refuser`.
+Cependant, cette branche comporte une limitation :
 
-Une fois que le serveur est lancé, les joueurs peuvent se connecter en utilisant l'adresse IP de votre serveur. Par exemple, si l'IP du serveur est `192.168.1.100`, le client peut se connecter avec la commande suivante :
+La gestion des déconnexions n'est pas complètement fonctionnelle. Si un joueur se déconnecte, la gestion des états des parties en cours peut rencontrer des problèmes, et nous n'avons pas eu le temps de corriger ce point avant la livraison finale.
+Commandes Disponibles
 
-```bash
-./awale_client 192.168.1.100
-```
+## Voici une liste des commandes disponibles pour le client :
 
-Si rien n'est spécifié, alors l'ip localhost sera automatiquement utilisée.
+`/defi <pseudo>` : Défie un autre joueur en utilisant son pseudo.
 
-## Fonctionnalités
+`/accepter` : Accepter un défi reçu d’un autre joueur.
 
-- **Gestion des défis** : Défiez d'autres joueurs avec la commande `/defi`.
-- **Chat intégré** : Entrez en mode chat avec la commande `/chat`.
-- **Tableau des scores** : Consultez le tableau des scores en tapant `/score`.
-- **Reconnexion** : Si vous êtes déconnecté, vous pouvez revenir dans la partie en vous reconnectant.
+`/refuser` : Refuser un défi reçu d’un autre joueur.
 
-## Compilation et Exécution
+`/liste` : Affiche la liste des joueurs actuellement connectés.
 
-Pour compiler et lancer le serveur et le client, assurez-vous d'avoir les fichiers suivants :
+`/chat` : Passe en mode chat pour discuter avec d'autres joueurs.
 
-- `server.c`
-- `server.h`
-- `client.c`
-- `client.h`
-- `Makefile`
+`/game` : Revient en mode jeu.
 
-Puis exécutez simplement :
+`/score` : Affiche le tableau des scores.
 
-```bash
-make
-```
+`/bio <pseudo>` : Affiche la biographie d’un joueur en spécifiant son pseudo.
 
-Cela générera les exécutables `server` et `client`.
+`exit` ou `disconnect` : Se déconnecter du serveur.
 
-Bon jeu !
+Ces commandes permettent de gérer la communication, les défis, et les interactions pendant le jeu.
+
+# Issues
+
+En cas de problème de syncro avec le serveur, appuyer sur la touche `m` puis `entrer` pour resyncroniser le client bugger et le serveur.
